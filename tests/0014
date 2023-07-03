@@ -1,0 +1,6 @@
+# Run the display RAM self-tests
+set R15 0x0C001000	# Mock a stack somewhere
+set PC 0x8003BA50
+break 0x8003BAEC
+run
+exit

@@ -1,0 +1,27 @@
+# Tests atoi() with the firmware digits at 0x0000826b ("37393") and 0x00012b65
+# ("-77399").
+
+# Mock a stack somewhere
+set R15 0x0C001000
+# Put something valid here to confirm that it gets preserved in the stack
+set PR 0x80000002
+
+# Coredll isn't mapped yet: fake it.
+map 0x01fa0400 0x80082000 0x00045400
+# Also break before returning from atoi() to check the results
+break 0x800ad34e
+
+set R4 0x8000826b
+set PC 0x800ad344
+run
+step
+dump cpu # R0 should have the integer value: 0x9211
+
+# Test a negative number to cover the NEG instruction
+set R4 0x80012b65
+set PC 0x800ad344
+run
+step
+dump cpu # R0 should have the integer value: 0xfffed1a9
+
+exit

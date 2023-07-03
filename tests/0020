@@ -1,0 +1,134 @@
+# Run the self-test for the buttons
+#
+# For the record I'm not entirely sure which are the "enter" and "exit" buttons.
+# TODO: update this with an explanation once I figure it out.
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+
+# This function sets the VBR and the default exception handlers.
+set PC 0x8003F044
+break 0x8003F108
+run
+step
+
+# The hardware interrupt handler at <0x8003EBC8> uses a static variable to
+# discard 99 out of every 100 interrupts. No idea what this is about, but for
+# this test just patch it away.
+patch 0x8003EBDA 0x0009
+
+# This function is the actual self-test
+set PC 0x800396E4
+set R4 0 # I don't know what the argument means, but it needs to be zero
+break 0x80039810 # Break before printing "Button Test Done", to patch the row
+break 0x8003981A # Break before returning from the test, to check the screen
+
+# <0x80036E38> is responsible for setting the inner interrupt handlers that get
+# called by <0x8003EBC8>. When unset, this static variable at 0x8C009E84 blocks
+# the setup from happening twice.
+set l:0x8C009E84 1
+
+# <0x80037078> waits for an interrupt and then plays a sound. Audio is not yet
+# implemented so just patch that out so that we can focus on the buttons.
+patch 0x80037094 0x0009
+
+# The self-test now prints "ButtonTest" and then loops waiting for interrupts.
+# We push and release all the buttons in turn, letting things run for a while
+# after each step. The firmware will respond by printing the button names to
+# the bottom of the screen, so we keep patching the print function to put this
+# output into separate rows.
+
+# "ButtonTest" prompt
+patch 0x800371EA 0xe613
+patch 0x80037216 0xe613
+step 10000
+
+# QL1 button
+patch 0x800371EA 0xe614
+patch 0x80037216 0xe614
+input QL1
+step 10000
+input QL1
+step 10000
+
+# QL2 button
+patch 0x800371EA 0xe615
+patch 0x80037216 0xe615
+input QL2
+step 10000
+input QL2
+step 10000
+
+# QL3 button
+patch 0x800371EA 0xe616
+patch 0x80037216 0xe616
+input QL3
+step 10000
+input QL3
+step 10000
+
+# QL4 button
+patch 0x800371EA 0xe617
+patch 0x80037216 0xe617
+input QL4
+step 10000
+input QL4
+step 10000
+
+# Exit button
+patch 0x800371EA 0xe618
+patch 0x80037216 0xe618
+input exit
+step 10000
+input exit
+step 10000
+
+# Record button
+patch 0x800371EA 0xe619
+patch 0x80037216 0xe619
+input record
+step 10000
+input record
+step 10000
+
+# Enter button
+patch 0x800371EA 0xe61a
+patch 0x80037216 0xe61a
+input enter
+step 10000
+input enter
+step 10000
+
+# Wheel down
+patch 0x800371EA 0xe61b
+patch 0x80037216 0xe61b
+input down
+step 10000
+input down
+step 10000
+
+# Wheel up
+patch 0x800371EA 0xe61c
+patch 0x80037216 0xe61c
+input up
+step 10000
+input up
+step 10000
+
+# On/off button. The loop breaks on this input.
+patch 0x800371EA 0xe61d
+patch 0x80037216 0xe61d
+step 10000
+input onoff
+step 10000
+input onoff
+run
+
+# Now print "Button Test Done"
+patch 0x800371EA 0xe61e
+patch 0x80037216 0xe61e
+run
+
+# Check the screen contents
+print CRC
+exit

@@ -1,0 +1,63 @@
+# Tests the printf() to screen of nknodbg.exe
+
+# I'm not 100% sure what this is yet, but it's used to generate the glyphs
+set l:0x8C009E68 0x80013ee4
+
+set R15 0x0C001000 # Mock a stack somewhere
+break 0x80037278 # Break before returning
+
+set R4 0x8002b7f4 # "WarmBoot"
+set PC 0x8003724c
+# Always patch the row so that each print goes to a new line
+patch 0x800371EA 0xe619
+patch 0x80037216 0xe619
+run
+
+set R4 0x8002b8a0 # "\nThis Menu %s not yet implemented!"
+set R5 0x8002b7f4 # "WarmBoot"
+set PC 0x8003724c
+patch 0x800371EA 0xe61a
+patch 0x80037216 0xe61a
+run
+
+set R4 0x8002b7c6 # "%3d %c%-30s"
+set R5 17
+set R6 0x58 # 'X'
+set R7 0x0002b875 # "Press any key"
+set PC 0x8003724c
+patch 0x800371EA 0xe61b
+patch 0x80037216 0xe61b
+run
+
+set R4 0x0002b859 # "Invalid Remote cmd %c H%X"
+set R5 0x59 # 'Y'
+set R6 0xd71a5ebb
+set PC 0x8003724c
+patch 0x800371EA 0xe61c
+patch 0x80037216 0xe61c
+run
+
+set R4 0x8002a79c # "Contrast=%d%%"
+set R5 78
+set PC 0x8003724c
+patch 0x800371EA 0xe61d
+patch 0x80037216 0xe61d
+run
+
+# This thing has binary conversion specifiers
+set R4 0x80e06eed # "I%B,"
+set R5 0x137f0124
+set PC 0x8003724c
+patch 0x800371EA 0xe61e
+patch 0x80037216 0xe61e
+run
+
+set R4 0x8021809a # "b%bc"
+set R5 0x137f0124
+set PC 0x8003724c
+patch 0x800371EA 0xe61f
+patch 0x80037216 0xe61f
+run
+
+print CRC
+exit

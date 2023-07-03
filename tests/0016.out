@@ -1,0 +1,96 @@
+[XB3A] \d\n
+[XB3A] EEPROM Test FC
+[I2C] >>> >a0 >80 >>> >a1 <7f ||| >>> >a0 >81 >>> >a1 <7e |||
+[I2C] >>> >a0 >82 >>> >a1 <7d ||| >>> >a0 >83 >>> >a1 <7c |||
+[I2C] >>> >a0 >84 >>> >a1 <7b ||| >>> >a0 >85 >>> >a1 <7a |||
+[I2C] >>> >a0 >86 >>> >a1 <79 ||| >>> >a0 >87 >>> >a1 <78 |||
+[I2C] >>> >a0 >88 >>> >a1 <77 ||| >>> >a0 >89 >>> >a1 <76 |||
+[I2C] >>> >a0 >8a >>> >a1 <75 ||| >>> >a0 >8b >>> >a1 <74 |||
+[I2C] >>> >a0 >8c >>> >a1 <73 ||| >>> >a0 >8d >>> >a1 <72 |||
+[I2C] >>> >a0 >8e >>> >a1 <71 ||| >>> >a0 >8f >>> >a1 <70 |||
+[I2C] >>> >a0 >90 >>> >a1 <6f ||| >>> >a0 >91 >>> >a1 <6e |||
+[I2C] >>> >a0 >92 >>> >a1 <6d ||| >>> >a0 >93 >>> >a1 <6c |||
+[I2C] >>> >a0 >94 >>> >a1 <6b ||| >>> >a0 >95 >>> >a1 <6a |||
+[I2C] >>> >a0 >96 >>> >a1 <69 ||| >>> >a0 >97 >>> >a1 <68 |||
+[I2C] >>> >a0 >98 >>> >a1 <67 ||| >>> >a0 >99 >>> >a1 <66 |||
+[I2C] >>> >a0 >9a >>> >a1 <65 ||| >>> >a0 >9b >>> >a1 <64 |||
+[I2C] >>> >a0 >9c >>> >a1 <63 ||| >>> >a0 >9d >>> >a1 <62 |||
+[I2C] >>> >a0 >9e >>> >a1 <61 ||| >>> >a0 >9f >>> >a1 <60 |||
+[I2C] >>> >a0 >a0 >>> >a1 <5f ||| >>> >a0 >a1 >>> >a1 <5e |||
+[I2C] >>> >a0 >a2 >>> >a1 <5d ||| >>> >a0 >a3 >>> >a1 <5c |||
+[I2C] >>> >a0 >a4 >>> >a1 <5b ||| >>> >a0 >a5 >>> >a1 <5a |||
+[I2C] >>> >a0 >a6 >>> >a1 <59 ||| >>> >a0 >a7 >>> >a1 <58 |||
+[I2C] >>> >a0 >a8 >>> >a1 <57 ||| >>> >a0 >a9 >>> >a1 <56 |||
+[I2C] >>> >a0 >aa >>> >a1 <55 ||| >>> >a0 >ab >>> >a1 <54 |||
+[I2C] >>> >a0 >ac >>> >a1 <53 ||| >>> >a0 >ad >>> >a1 <52 |||
+[I2C] >>> >a0 >ae >>> >a1 <51 ||| >>> >a0 >af >>> >a1 <50 |||
+[I2C] >>> >a0 >b0 >>> >a1 <4f ||| >>> >a0 >b1 >>> >a1 <4e |||
+[I2C] >>> >a0 >b2 >>> >a1 <4d ||| >>> >a0 >b3 >>> >a1 <4c |||
+[I2C] >>> >a0 >b4 >>> >a1 <4b ||| >>> >a0 >b5 >>> >a1 <4a |||
+[I2C] >>> >a0 >b6 >>> >a1 <49 ||| >>> >a0 >b7 >>> >a1 <48 |||
+[I2C] >>> >a0 >b8 >>> >a1 <47 ||| >>> >a0 >b9 >>> >a1 <46 |||
+[I2C] >>> >a0 >ba >>> >a1 <45 ||| >>> >a0 >bb >>> >a1 <44 |||
+[I2C] >>> >a0 >bc >>> >a1 <a0 ||| >>> >a0 >bd >>> >a1 <a5 |||
+[I2C] >>> >a0 >be >>> >a1 <4b ||| >>> >a0 >bf >>> >a1 <bb |||
+[I2C] >>> >a0 >00 >>> >a1 <ff ||| >>> >a0 >01 >>> >a1 <fe |||
+[I2C] >>> >a0 >02 >>> >a1 <fd ||| >>> >a0 >03 >>> >a1 <fc |||
+[I2C] >>> >a0 >04 >>> >a1 <fb ||| >>> >a0 >05 >>> >a1 <fa |||
+[I2C] >>> >a0 >06 >>> >a1 <f9 ||| >>> >a0 >07 >>> >a1 <f8 |||
+[I2C] >>> >a0 >08 >>> >a1 <f7 ||| >>> >a0 >09 >>> >a1 <f6 |||
+[I2C] >>> >a0 >0a >>> >a1 <f5 ||| >>> >a0 >0b >>> >a1 <f4 |||
+[I2C] >>> >a0 >0c >>> >a1 <f3 ||| >>> >a0 >0d >>> >a1 <f2 |||
+[I2C] >>> >a0 >0e >>> >a1 <f1 ||| >>> >a0 >0f >>> >a1 <f0 |||
+[I2C] >>> >a0 >10 >>> >a1 <ef ||| >>> >a0 >11 >>> >a1 <ee |||
+[I2C] >>> >a0 >12 >>> >a1 <ed ||| >>> >a0 >13 >>> >a1 <ec |||
+[I2C] >>> >a0 >14 >>> >a1 <eb ||| >>> >a0 >15 >>> >a1 <ea |||
+[I2C] >>> >a0 >16 >>> >a1 <e9 ||| >>> >a0 >17 >>> >a1 <e8 |||
+[I2C] >>> >a0 >18 >>> >a1 <e7 ||| >>> >a0 >19 >>> >a1 <e6 |||
+[I2C] >>> >a0 >1a >>> >a1 <e5 ||| >>> >a0 >1b >>> >a1 <e4 |||
+[I2C] >>> >a0 >1c >>> >a1 <e3 ||| >>> >a0 >1d >>> >a1 <e2 |||
+[I2C] >>> >a0 >1e >>> >a1 <e1 ||| >>> >a0 >1f >>> >a1 <e0 |||
+[I2C] >>> >a0 >20 >>> >a1 <df ||| >>> >a0 >21 >>> >a1 <de |||
+[I2C] >>> >a0 >22 >>> >a1 <dd ||| >>> >a0 >23 >>> >a1 <dc |||
+[I2C] >>> >a0 >24 >>> >a1 <db ||| >>> >a0 >25 >>> >a1 <da |||
+[I2C] >>> >a0 >26 >>> >a1 <d9 ||| >>> >a0 >27 >>> >a1 <d8 |||
+[I2C] >>> >a0 >28 >>> >a1 <d7 ||| >>> >a0 >29 >>> >a1 <d6 |||
+[I2C] >>> >a0 >2a >>> >a1 <d5 ||| >>> >a0 >2b >>> >a1 <d4 |||
+[I2C] >>> >a0 >2c >>> >a1 <d3 ||| >>> >a0 >2d >>> >a1 <d2 |||
+[I2C] >>> >a0 >2e >>> >a1 <d1 ||| >>> >a0 >2f >>> >a1 <d0 |||
+[I2C] >>> >a0 >30 >>> >a1 <cf ||| >>> >a0 >31 >>> >a1 <ce |||
+[I2C] >>> >a0 >32 >>> >a1 <cd ||| >>> >a0 >33 >>> >a1 <cc |||
+[I2C] >>> >a0 >34 >>> >a1 <cb ||| >>> >a0 >35 >>> >a1 <ca |||
+[I2C] >>> >a0 >36 >>> >a1 <c9 ||| >>> >a0 >37 >>> >a1 <c8 |||
+[I2C] >>> >a0 >38 >>> >a1 <c7 ||| >>> >a0 >39 >>> >a1 <c6 |||
+[I2C] >>> >a0 >3a >>> >a1 <c5 ||| >>> >a0 >3b >>> >a1 <c4 |||
+[I2C] >>> >a0 >3c >>> >a1 <c3 ||| >>> >a0 >3d >>> >a1 <c2 |||
+[I2C] >>> >a0 >3e >>> >a1 <c1 ||| >>> >a0 >3f >>> >a1 <c0 |||
+[I2C] >>> >a0 >fc >>> >a1 <a2 ||| >>> >a0 >fd >>> >a1 <7c |||
+[I2C] >>> >a0 >fc >00 ||| >>> >a0 >fd >00 |||
+[I2C] >>> >a0 >fc >>> >a1 <00 ||| >>> >a0 >fd >>> >a1 <00 |||
+[I2C] >>> >a0 >fc >a2 ||| >>> >a0 >fd >7c |||
+[XB3A] \d\n
+[XB3A] EEPROM Test FC7C7D7E7F-7A7B-7879-7776-757473727170\d\n
+[XB3A] Serial = onmlkjihgfedcba`_^]\[ZYXWVUTSRQPONMLKJIHGFED\xa0\xa5\d\n
+[XB3A] ProdID = cba`_^]\[ZYXWVUTSRQPONMLKJIHGFED\xa0\xa5\d\n
+[XB3A] ChkSum = H'3DB2
+Writing 0x00 to unknown display register 0x14000024 (PC: 0x80036848)
+Writing 0xf0 to unknown display register 0x14000026 (PC: 0x8003684c)
+Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036850)
+Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036874)
+Writing 0xff to unknown display register 0x14000024 (PC: 0x80036848)
+Writing 0x00 to unknown display register 0x14000026 (PC: 0x8003684c)
+Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036850)
+Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036880)
+Writing 0x00 to unknown display register 0x14000024 (PC: 0x80036848)
+Writing 0xf0 to unknown display register 0x14000026 (PC: 0x8003684c)
+Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036850)
+Writing 0xf0 to unknown display register 0x14000026 (PC: 0x800368aa)
+Writing 0xff to unknown display register 0x14000024 (PC: 0x80036848)
+Writing 0x00 to unknown display register 0x14000026 (PC: 0x8003684c)
+Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036850)
+Writing 0x00 to unknown display register 0x14000026 (PC: 0x800368b6)
+[SERIAL] ChkSum = H'3DB2, Serial = onmlkjihgfedcba`_^]\[ZYXWVUTSRQPONMLK
+[SERIAL] JIHGFED\xa0\xa5, ProdID = cba`_^]\[ZYXWVUTSRQPONMLKJIHGFED\xa0\xa5
+[SERIAL] , 7C7D7E7F-7A7B-7879-7776-757473727170, \d\n
+[SERIAL] BOD= [H] 71/70/17477
+Display CRC: 3efc4b9d

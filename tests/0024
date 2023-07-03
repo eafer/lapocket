@@ -1,0 +1,69 @@
+# Run the self-test for the touchscreen
+#
+# I have some doubts about the correctness of this test, because the "PenDown"
+# message only remains on screen for an instant before switching to "PenUp",
+# even if the pen is still touching the screen. Maybe one day I'll figure out
+# how to run this on my physical device, so that I can compare (TODO).
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+
+# This function sets the VBR and the default exception handlers.
+set PC 0x8003F044
+break 0x8003F108
+run
+step
+
+# The hardware interrupt handler at <0x8003EBC8> uses a static variable to
+# discard 99 out of every 100 interrupts. No idea what this is about, but for
+# this test just patch it away.
+patch 0x8003EBDA 0x0009
+
+# This function is the actual self-test
+set PC 0x80038FA8
+set R4 0 # I don't know what the argument means, but it needs to be zero
+break 0x80039254 # Break before printing, to patch the row and send new input
+
+# Touchscreen interrupts will now get set to arrive on rising edge, and  the
+# code will loop waiting for the pen to touch the screen. We try a couple of
+# locations and then exit (I haven't figured out how to properly terminate this
+# self-test). The firmware will respond by printing the locations to the bottom
+# of the screen, so we keep patching the print function to put this output into
+# separate rows.
+#
+# TODO: should we to lift the pen after each input? The emulator is assuming
+# that we get a new rising edge when the pen just moves on the screen but that
+# sounds unlikely.
+run
+step # Always a step so that we don't break again on return from the handler
+
+input pen 12,20
+patch 0x800371EA 0xe61b
+patch 0x80037216 0xe61b
+run
+step
+
+input pen 0,45
+patch 0x800371EA 0xe61c
+patch 0x80037216 0xe61c
+run
+step
+
+input pen 0,0
+patch 0x800371EA 0xe61d
+patch 0x80037216 0xe61d
+run
+step
+
+# Depending on calibration, some of these inputs may not actually be valid...
+input pen 728,814
+patch 0x800371EA 0xe61e
+patch 0x80037216 0xe61e
+run
+
+patch 0x800371EA 0xe61f
+patch 0x80037216 0xe61f
+run
+
+print CRC
+exit

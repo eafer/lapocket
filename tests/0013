@@ -1,0 +1,17 @@
+# Run the memory self-tests
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set l:0x8c01abdc 1			# No idea, but it must be set or the test aborts
+set l:0xac002880 0x01000000 # Memory size in bytes
+set R15 0x0C001000			# Mock a stack somewhere
+
+set PC 0x8003DC30
+break 0x8003DCE0
+run
+
+# We check the screen too, just in case, but its final contents are just the
+# same text as the console. The screen does get more intermediate output, but
+# every new line seems to overwrite the last one so it would be hard to check
+# everything.
+print CRC
+exit

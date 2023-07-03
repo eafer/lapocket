@@ -1,0 +1,63 @@
+# Tests TlsSetValue() and TlsGetValue() with a fake location for the storage
+
+# Fake the thread-local storage
+map 0x00005000 0x0C002000 0x00001000
+set l:0x0C002800 0x00005000
+# Break before returning from either function
+break 0x8008FB8C
+break 0x8008FBA6
+
+# Save 0x3e621a85 to index 2
+set R4 2
+set R5 0x3e621a85
+set PC 0x8008FB9C
+run
+step
+dump cpu # R0 should be 1 on success
+
+# Save 0x82ab127c to index 7
+set R4 7
+set R5 0x82ab127c
+set PC 0x8008FB9C
+run
+step
+dump cpu # R0 should be 1 on success
+
+# Save 0x88dd1423 to index 2
+set R4 2
+set R5 0x88dd1423
+set PC 0x8008FB9C
+run
+step
+dump cpu # R0 should be 1 on success
+
+# Save 0x6edab142 to index 82
+set R4 82
+set R5 0x6edab142
+set PC 0x8008FB9C
+run
+step
+dump cpu # R0 should be 1 on success
+
+# Get the variable from index 2
+set R4 2
+set PC 0x8008FB84
+run
+step
+dump cpu # R0 should have the value: 0x88dd1423
+
+# Get the variable from index 7
+set R4 7
+set PC 0x8008FB84
+run
+step
+dump cpu # R0 should have the value: 0x82ab127c
+
+# Get the variable from index 82
+set R4 82
+set PC 0x8008FB84
+run
+step
+dump cpu # R0 should have the value: 0x6edab142
+
+exit

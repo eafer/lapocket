@@ -1,0 +1,10 @@
+# Tests the function that measures RAM size during boot
+
+set R15 0x0C001000 # Mock a stack somewhere
+set PC 0x80030240
+break 0x800302A2
+run
+step
+dump cpu # R0 should have the size in bytes: 0x01000000
+
+exit

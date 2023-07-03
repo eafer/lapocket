@@ -1,0 +1,26 @@
+# Run the self-tests for contrast and brightness
+
+set R15 0x0C001000			# Mock a stack somewhere
+set l:0x8C009C20 0xb2000000	# This global points to the motherboard registers
+
+# The DACR register must be set first or the D/A converter won't do anything
+set R5 0x0C004000
+set PC 0x80034B18
+break 0x80034B36
+run
+
+# The contrast self-test. Setting R4 to 1 seems to make the test automatic.
+# Note that <0x80036924> caps the contrast voltage at 200 for some reason, so
+# the test output never goes above 78%.
+set R4 1
+set PC 0x80038520
+break 0x80038882
+run
+
+# The brightness self-test. Same thing for R4.
+set R4 1
+set PC 0x8003889C
+break 0x80038BFE
+run
+
+exit

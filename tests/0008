@@ -1,0 +1,17 @@
+# Tests wcscpy() with the firmware string at 0x0002c420.
+
+# Mock a stack somewhere
+set R15 0x0C001000
+# Put something valid here to confirm that it gets preserved in the stack
+set R8 0x98765432
+
+set R4 0x0C000000 # Somewhere to dump the output
+set R5 0x8002c420
+set PC 0x800A4BCC
+break 0x800a4be2
+run
+step
+dump cpu # R0 should have a pointer to the copied string: 0x0C000000
+xxd 0x0C000000 0x90 # This should have the actual output
+
+exit

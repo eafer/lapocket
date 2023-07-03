@@ -1,0 +1,73 @@
+# Tests a long-to-double conversion function I encountered while investigating
+# pen input. It uses 2 new instructions: SHLL16 and ROTCR.
+
+set R15 0x0C001000			# Mock a stack somewhere
+set R4 0x0C004000			# Array that will receive the doubles
+break 0x800417EA			# Break before returning
+
+# The R5 argument is the number (longword) to convert
+set PC 0x8004175C
+set R5 0x00000018
+run
+step
+
+set PC 0x8004175C
+set R4 +8
+set R5 0x000000cf
+run
+step
+
+# Zero is a special case for the function
+set PC 0x8004175C
+set R4 +8
+set R5 0x00000000
+run
+step
+
+# And so are the numbers above 0x01000000
+set PC 0x8004175C
+set R4 +8
+set R5 0x01000000
+run
+step
+
+set PC 0x8004175C
+set R4 +8
+set R5 0x01234567
+run
+step
+
+set PC 0x8004175C
+set R4 +8
+set R5 0x76543210
+run
+step
+
+# Test some negative numbers as well
+set PC 0x8004175C
+set R4 +8
+set R5 0xffffffff
+run
+step
+
+set PC 0x8004175C
+set R4 +8
+set R5 0x80000000
+run
+step
+
+set PC 0x8004175C
+set R4 +8
+set R5 0xa5b3cf01
+run
+step
+
+set PC 0x8004175C
+set R4 +8
+set R5 0xf8d6ea99
+run
+step
+
+# Dump the array of doubles
+xxd 0x0C004000 0x50
+exit

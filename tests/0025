@@ -1,0 +1,61 @@
+# Tests a function to multiply doubles that I encountered while investigating
+# the battery. It uses three new instructions: DMULU, STSMACH and XTRCT.
+
+set R15 0x0C001000			# Mock a stack somewhere
+break 0x80041206			# Break before returning
+
+# R5 and R6 point to the factors. The output will go to the R4 address.
+
+# 30.0 * 30.0 = 900.0
+set PC 0x800410B0
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x00000000
+set l:0x0C01000C 0x403e0000
+set l:0x0C010010 0x00000000
+set l:0x0C010014 0x403e0000
+run
+step
+xxd 0x0C010000 0x18
+
+# 83492.785 * -947343.64 ~= -79096358855.6374
+set PC 0x800410B0
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x8f5c28f6
+set l:0x0C01000C 0x40f4624c
+set l:0x0C010010 0x47ae147b
+set l:0x0C010014 0xc12ce91f
+run
+step
+xxd 0x0C010000 0x18
+
+# Infinity * Infinity = Infinity
+set PC 0x800410B0
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x00000000
+set l:0x0C01000C 0x7ff00000
+set l:0x0C010010 0x00000000
+set l:0x0C010014 0x7ff00000
+run
+step
+xxd 0x0C010000 0x18
+
+# 1.11 * DBL_MAX = Infinity
+set PC 0x800410B0
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x5c28f5c3
+set l:0x0C01000C 0x3ff1c28f
+set l:0x0C010010 0xffffffff
+set l:0x0C010014 0x7fefffff
+run
+step
+xxd 0x0C010000 0x18
+
+exit

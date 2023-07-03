@@ -1,0 +1,13 @@
+# Tests that the relative frequency of R64CNT and TCNT0 updates is within an
+# acceptable range. The actual frequencies don't matter to us here because we
+# don't want to deal with the system clock and sacrifice determinism.
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+
+set PC 0x8003BB10
+break 0x8003BBA8
+run
+dump cpu # R0 should be 0 if the test succeeded
+
+exit

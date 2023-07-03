@@ -1,0 +1,8 @@
+# Tests abs() with number -7
+set R4 -7
+set PC 0x800abed8
+break 0x800abeda
+run
+step
+dump cpu # R0 should have the absolute value: 7
+exit

@@ -1,0 +1,7 @@
+# Tests strchr() with the firmware string at 0x0000041d, character 'E'
+set R5 0x45
+set R4 0x8000041d
+set PC 0x800B2E2C
+step 66
+dump cpu
+exit

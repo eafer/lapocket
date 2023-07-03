@@ -1,0 +1,37 @@
+# Run the self-tests for a CompactFlash memory card
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+set l:0x8C009C20 0xb2000000	# This global points to the motherboard registers
+
+# The PJCR register must be set to allow output through pin 0x20 before the
+# tests can run - that seems to be the reset line for the card. I think this is
+# supposed to happen at address 0x80030EAA, but I can't just jump there because
+# it sets several other still unsupported PJCR bits.
+set PJCR 0x0400
+
+# The function at <0x8003F260> is supposed to generate random numbers between 0
+# and R4, but I don't know how it works and it's not the priority right now.
+# Instead patch it to always return one less than R4: the tested sector will be
+# the last one, and every byte written will be 0xfe.
+patch 0x8003F260 0x6043
+patch 0x8003F262 0x000b
+patch 0x8003F264 0x70ff
+
+# Now the self-tests
+set PC 0x8003DA7C
+# Break after the sector has been written and check the contents. The self-test
+# itself will also verify the contents, but it has no way to confirm that it's
+# working with the right sector.
+break 0x8003C236
+run
+crc card 524287
+# That was memory mode. Do the same for I/O mode.
+break 0x8003C5D4
+run
+crc card 524287
+# Now keep going until the end
+break 0x8003DBD8
+run
+step
+exit

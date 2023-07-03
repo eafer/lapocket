@@ -1,0 +1,15 @@
+# Run the self-test for the battery
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+set l:0x8C009C20 0xb2000000	# This global points to the motherboard registers
+
+# This function is the actual self-test
+set PC 0x80039360
+break 0x80039696
+serialin \x08 # Backspace ends the test for some reason
+run
+step
+
+print CRC
+exit

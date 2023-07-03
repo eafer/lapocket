@@ -1,0 +1,24 @@
+Writing 0x0100 to unknown motherboard register 0x12000030 (PC: 0x8003dad4)
+[XB3A] \d\n
+[XB3A] Begin CIS Parsing ...Done\d\n
+[XB3A] Generate Random Sector Data ...Done\d\n
+[XB3A] Read CF Config...Done\d\n
+[XB3A] LBA Total = 524288 Test=524287\d\n
+[XB3A] Read and Store Selected Test Sector ...Done\d\n
+[XB3A] Write Sector with Test Pattern...Done
+Card sector 524287 CRC: 8c347018
+[XB3A] \d\n
+[XB3A] Read Sector Test Pattern...Done\d\n
+[XB3A] Restore Sector ...Done\d\n
+[XB3A] Read & Verify back Restore Sector ...Done\d\n
+[XB3A] Generate Random Sector Data ...Done\d\n
+[XB3A] Read CF Config...Done\d\n
+[XB3A] LBA Total = 524288 Test=524287\d\n
+[XB3A] Read and Store Selected Test Sector ...Done\d\n
+[XB3A] Write Sector with Test Pattern...Done
+Card sector 524287 CRC: 8c347018
+[XB3A] \d\n
+[XB3A] Read Sector Test Pattern...Done\d\n
+[XB3A] Restore Sector ...Done\d\n
+[XB3A] Read & Verify back Restore Sector ...Done
+Writing 0x0100 to unknown motherboard register 0x12000000 (PC: 0x8003dbce)

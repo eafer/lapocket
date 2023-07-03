@@ -1,0 +1,47 @@
+# Tests reading and writing to EEPROM via i2c. Note that I don't know much
+# about hardware, but I'm guessing that writes such as these would not be
+# possible on a physical eeprom. It doesn't matter right now, though.
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+
+# Read the initial EEPROM contents. These values are mostly made-up because my
+# Jornada's EEPROM appears to be dead. TODO: try to get them elsewhere...
+set PC 0x800302BC
+break 0x80030362
+run
+
+# The OS and Firmware configuration were read to these locations, respectively.
+xxd 0xAC002840 0x3E
+xxd 0xAC002800 0x3E
+
+# Now we'll write a new Firmware configuration to EEPROM, retrieved from the
+# serial console.
+set PC 0x8003217C
+break 0x800324E8
+
+# Don't start with the serial input until the prompt shows up
+break 0x80032190
+run
+# This is a header for the data to write: 0x003E is the data size; the first
+# \x00 is the target address in EEPROM; and the last two bytes are a checksum.
+serialin 1\x002\x3e\x00\xcc\xc9
+
+# Now wait until we get prompted for the actual data
+break 0x8003223E
+run
+# 0x3E data bytes, plus two checksum bytes. For the record, the checksum is
+# calculated by the function at <0x800300A8>.
+serialin Bx234567890123456789012345678901234567890123456789012345678901\x2a\x91
+
+# This is when the EEPROM write actually happens
+run
+
+# Now read the EEPROM again to verify that it got updated
+set PC 0x800302BC
+break 0x80030362
+run
+xxd 0xAC002840 0x3E
+xxd 0xAC002800 0x3E
+
+exit

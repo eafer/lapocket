@@ -1,0 +1,31 @@
+# Sets up and tests a basic exception handler for TRAPA
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+
+# This function sets the exception handlers. We make it jump, on return, to a
+# TRAPA instruction. Messing with the PR like this will trigger a "Backtrace
+# stack seems empty?" message.
+set PC 0x8003F044
+set PR 0x8002BF48
+break 0x8002BF48
+run
+dump cpu # We hope to see that (most of) these registers get preserved by TRAPA
+
+# Inside the trap handler - check that my new STC.L/STS.L instructions worked:
+break 0x8c01355a
+run
+xxd 0x0c000fa0 0x60
+
+# Leaving the handler - check that my new LDC.L/LDS.L instructions worked:
+break 0x8c01358c
+run
+dump cpu
+
+# Finally test the RTE instruction
+step
+dump cpu
+
+# The handler should print the exception type ("UnconditionalTrap") to screen
+print CRC
+exit

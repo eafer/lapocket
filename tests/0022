@@ -1,0 +1,126 @@
+# Tests a function to add doubles that I encountered while investigating pen
+# input. It uses 2 new instructions: SHLR and CMPPL.
+
+set R15 0x0C001000			# Mock a stack somewhere
+break 0x80041A54			# Break before returning
+
+# R5 and R6 point to the doubles to add. The output will go to the R4 address.
+
+# 207.0 + 0.0 = 207.0
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x00000000
+set l:0x0C01000C 0x4069e000
+set l:0x0C010010 0x00000000
+set l:0x0C010014 0x00000000
+run
+step
+xxd 0x0C010000 0x18
+
+# 207.0 + 24.0 = 231.0
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x00000000
+set l:0x0C01000C 0x4069e000
+set l:0x0C010010 0x00000000
+set l:0x0C010014 0x40380000
+run
+step
+xxd 0x0C010000 0x18
+
+# 16777216.0 + 1985229328.0 = 2002006544.0
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x00000000
+set l:0x0C01000C 0x41700000
+set l:0x0C010010 0x84000000
+set l:0x0C010014 0x41dd950c
+run
+step
+xxd 0x0C010000 0x18
+
+# (-1514942719.0) + (-120132967.0) = -1635075686.0
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x3fc00000
+set l:0x0C01000C 0xc1d6930c
+set l:0x0C010010 0x9c000000
+set l:0x0C010014 0xc19ca455
+run
+step
+xxd 0x0C010000 0x18
+
+# 19088743.0 + (-120132967.0) = -101044224.0
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x70000000
+set l:0x0C01000C 0x41723456
+set l:0x0C010010 0x9c000000
+set l:0x0C010014 0xc19ca455
+run
+step
+xxd 0x0C010000 0x18
+
+# Infinity + Infinity = Infinity
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x00000000
+set l:0x0C01000C 0x7ff00000
+set l:0x0C010010 0x00000000
+set l:0x0C010014 0x7ff00000
+run
+step
+xxd 0x0C010000 0x18
+
+# Infinity + (-Infinity) = NaN
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x00000000
+set l:0x0C01000C 0x7ff00000
+set l:0x0C010010 0x00000000
+set l:0x0C010014 0xfff00000
+run
+step
+xxd 0x0C010000 0x18
+
+# DBL_MAX + DBL_MAX = Infinity
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0xffffffff
+set l:0x0C01000C 0x7fefffff
+set l:0x0C010010 0xffffffff
+set l:0x0C010014 0x7fefffff
+run
+step
+xxd 0x0C010000 0x18
+
+# 0.1 + 0.2 ~= 0.30000000000000004
+set PC 0x80041824
+set R4 0x0C010000
+set R5 0x0C010008
+set R6 0x0C010010
+set l:0x0C010008 0x9999999a
+set l:0x0C01000C 0x3fb99999
+set l:0x0C010010 0x9999999a
+set l:0x0C010014 0x3fc99999
+run
+step
+xxd 0x0C010000 0x18
+
+exit

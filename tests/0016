@@ -1,0 +1,21 @@
+# Run the eeprom self-tests
+
+set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
+set R15 0x0C001000			# Mock a stack somewhere
+
+set PC 0x8003A60C
+break 0x8003AB88
+
+# At this point, the code expects input for some reason. No prompt is given.
+break 0x8003AA5E
+run
+serialin X
+
+run
+
+# The screen gets most of the interesting information from this test. Too bad
+# it's all nonsense because my Jornada's eeprom seems to be dead and I can't
+# get a dump. Hmm, I'm starting to wonder if this thing really has an eeprom,
+# maybe this is all dead code in the firmware...
+print CRC
+exit

@@ -1,0 +1,31 @@
+# Tests an integer division function I encountered while investigating
+# brightness and contrast. It uses 3 new instructions: DIV0S, ADDC and SUBC.
+# TODO: is this supposed to work for signed numbers? Currently it doesn't.
+# TODO: test division by zero once we can get it to work.
+
+set R15 0x0C001000	# Mock a stack somewhere
+break 0x80040BB8	# Break before returning
+
+set R4 10
+set R5 2
+set PC 0x80040B24
+run
+step
+dump cpu # R0 should be 5
+
+set R4 11
+set R5 3
+set PC 0x80040B24
+run
+step
+dump cpu # R0 should be 3
+
+# The actual values used when this function gets called inside <80031B14>
+set R4 0x01518000
+set R5 0x12c000
+set PC 0x80040B24
+run
+step
+dump cpu # R0 should be 0x12
+
+exit
