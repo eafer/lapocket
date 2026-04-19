@@ -1,0 +1,11 @@
+# Tests the function that initializes the 0xB3A interface, with several badly
+# spoofed registers.
+
+set R15 0x0C001000 # Mock a stack somewhere
+set PC 0x80035580
+break 0x80035670
+run
+step
+dump cpu # R0 should be 1, meaning "success"
+
+exit

@@ -2581,11 +2581,27 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 #define XB3A_REGS_OFF	0x13A00000
 
 /* 0xB3A***** registers encountered so far */
+#define XB3A_014_OFF	0x13A00014
+#define XB3A_018_OFF	0x13A00018
+#define XB3A_020_OFF	0x13A00020
+#define XB3A_024_OFF	0x13A00024
+#define XB3A_028_OFF	0x13A00028
+#define XB3A_07C_OFF	0x13A0007C
+#define XB3A_080_OFF	0x13A00080
+#define XB3A_084_OFF	0x13A00084
+#define XB3A_0AC_OFF	0x13A000AC
+#define XB3A_13C_OFF	0x13A0013C
+#define XB3A_18C_OFF	0x13A0018C
 #define XB3A_19C_OFF	0x13A0019C
 #define XB3A_1A0_OFF	0x13A001A0
 #define XB3A_1A4_OFF	0x13A001A4
 #define XB3A_1A8_OFF	0x13A001A8
-#define XB3A_18C_OFF	0x13A0018C
+#define XB3A_1B0_OFF	0x13A001B0
+#define XB3A_1C8_OFF	0x13A001C8
+#define XB3A_1D8_OFF	0x13A001D8
+#define XB3A_1E0_OFF	0x13A001E0
+#define XB3A_1F0_OFF	0x13A001F0
+#define XB3A_1F8_OFF	0x13A001F8
 
 static void console_monitor_dump(struct console_monitor *mon)
 {
@@ -2654,9 +2670,24 @@ static void console_monitor_save_byte(struct console_monitor *mon, uint8_t byte)
 static void xB3A_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
+	case XB3A_014_OFF:
+	case XB3A_018_OFF:
+	case XB3A_020_OFF:
+	case XB3A_024_OFF:
+	case XB3A_028_OFF:
+	case XB3A_07C_OFF:
+	case XB3A_080_OFF:
+	case XB3A_084_OFF:
+	case XB3A_0AC_OFF:
 	case XB3A_1A0_OFF:
 	case XB3A_1A4_OFF:
 	case XB3A_1A8_OFF:
+	case XB3A_1B0_OFF:
+	case XB3A_1C8_OFF:
+	case XB3A_1D8_OFF:
+	case XB3A_1E0_OFF:
+	case XB3A_1F0_OFF:
+	case XB3A_1F8_OFF:
 		/* Do nothing, for now */
 		return;
 	case XB3A_18C_OFF:
@@ -2669,8 +2700,22 @@ static void xB3A_write_byte_reg(uint32_t addr, uint8_t val)
 
 static uint8_t xB3A_read_byte_reg(uint32_t addr)
 {
+	static unsigned int readcnt = 0;
+
 	/* Just return something that matches whatever the firmware expects */
 	switch (addr) {
+	case XB3A_014_OFF:
+		return 0;
+	case XB3A_13C_OFF:
+		/*
+		 * The function at <0x8003557C> (which seems to initialize this
+		 * interface), loops around this register until the value becomes 0x00,
+		 * and then loops again until it becomes 0x25. No idea what this means,
+		 * but for now alternating the two values is enough to keep going.
+		 */
+		if (++readcnt == 200)
+			readcnt = 0;
+		return readcnt < 100 ? 0x00 : 0x25;
 	case XB3A_19C_OFF:
 		return 0x02;
 	case XB3A_1A4_OFF:
