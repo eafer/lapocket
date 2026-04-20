@@ -2347,6 +2347,17 @@ static bool is_ioports_byte_address(uint32_t addr)
 	}
 }
 
+/* Prints notices about unknown pin outputs only when they change */
+#define NOTICE_PIN(pin, val)										\
+	do {															\
+		static unsigned int last_val_##pin = 2;						\
+																	\
+		if (last_val_##pin == (val))								\
+			break;													\
+		last_val_##pin = (val);										\
+		notice("Output of %u through unknown pin %s\n", val, #pin);	\
+	} while (false)
+
 static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	uint16_t control;
@@ -2366,7 +2377,7 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 		if ((control & PFC_PD1_MASK) == PFC_PD1_OUT)
 			front4_requested = !(val & 0x02);
 		if ((control & PFC_PD7_MASK) == PFC_PD7MD0)
-			notice("Output of %u through unknown pin PD7\n", val >> 7);
+			NOTICE_PIN(PD7, val >> 7);
 		ioports.PDDR = val & 0xAF;
 		return;
 	case IOPORTS_PEDR_OFF:
@@ -2380,11 +2391,11 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 			return;
 		}
 		if ((control & PFC_PE7_MASK) == PFC_PE7MD0)
-			notice("Output of %u through unknown pin PE7\n", val >> 7);
+			NOTICE_PIN(PE7, val >> 7);
 		if ((control & PFC_PE4_MASK) == PFC_PE4MD0)
-			notice("Output of %u through unknown pin PE4\n", (val & 0x10) >> 4);
+			NOTICE_PIN(PE4, (val & 0x10) >> 4);
 		if ((control & PFC_PE3_MASK) == PFC_PE3MD0)
-			notice("Output of %u through unknown pin PE3\n", (val & 0x08) >> 3);
+			NOTICE_PIN(PE3, (val & 0x08) >> 3);
 		if ((control & PFC_PE2_MASK) == PFC_PE2MD0)
 			val & 0x04 ? i2c_release_sda() : i2c_pull_down_sda();
 		if ((control & PFC_PE0_MASK) == PFC_PE0MD0)
@@ -2406,7 +2417,7 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 			return;
 		}
 		if ((control & PFC_PH7_MASK) == PFC_PH7MD0)
-			notice("Output of %u through unknown pin PH7\n", val >> 7);
+			NOTICE_PIN(PH7, val >> 7);
 		ioports.PHDR = val & 0x80;
 		return;
 	case IOPORTS_PJDR_OFF:
@@ -2419,7 +2430,7 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 		if ((control & PFC_PJ3_MASK) == PFC_PJ3MD0)
 			val & 0x08 ? i2c_pull_up_scl() : i2c_pull_down_scl();
 		if ((control & PFC_PJ4_MASK) == PFC_PJ4MD0)
-			notice("Output of %u through unknown pin PJ4\n", (val & 0x10) >> 4);
+			NOTICE_PIN(PJ4, (val & 0x10) >> 4);
 		if ((control & PFC_PJ5_MASK) == PFC_PJ5MD0) {
 			/* If the line is held the card is already reset for us */
 			if (val & 0x20 && !(ioports.PJDR & 0x20))
