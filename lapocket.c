@@ -3223,6 +3223,48 @@ static bool is_ubc_longword_address(uint32_t addr)
 }
 
 /*
+ * The registers for cache control. We don't actually implement the cache so
+ * these are trivial to handle.
+ */
+#define CACHE_CCR_OFF	0xFFFFFFEC
+#define CACHE_CCR2_OFF	0x040000B0
+
+struct cache {
+	uint32_t CCR;	/* Cache control register */
+} cache = {0};
+
+/* Flags of the CCR register */
+#define CCR_CF			(1U << 3)	/* Cache flush bit */
+#define CCR_CB			(1U << 2)	/* Cache write-back bit */
+#define CCR_WT			(1U << 1)	/* Write-through bit */
+#define CCR_CE			(1U << 0)	/* Cache enable bit */
+#define CCR_BIT_MASK	(CCR_CF | CCR_CB | CCR_WT | CCR_CE)
+
+static bool is_cache_longword_address(uint32_t addr)
+{
+	switch (addr) {
+	case CACHE_CCR_OFF:
+	case CACHE_CCR2_OFF:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void cache_write_longword_reg(uint32_t addr, uint32_t val)
+{
+	switch (addr) {
+	case CACHE_CCR_OFF:
+		if (val & ~CCR_BIT_MASK)
+			return panic("Bad value set on CCR\n");
+		cache.CCR = val;
+		return;
+	default:
+		return panic("Attempted write to unsupported cache register at 0x%.8x\n", addr);
+	}
+}
+
+/*
  * The registers for the Timer Unit are accessed through bytes, words and
  * longwords in address range 0xFFFFFE90-0xFFFFFEBB.
  */
@@ -4705,6 +4747,8 @@ static void write_longword(uint32_t addr, uint32_t val)
 			return tmu_write_longword_reg(addr, val);
 		if (is_dmac_longword_address(addr))
 			return dmac_write_longword_reg(addr, val);
+		if (is_cache_longword_address(addr))
+			return cache_write_longword_reg(addr, val);
 		break;
 	}
 	panic("Attempted write to unknown address 0x%.8x (value: 0x%.8x)\n", addr, val);
