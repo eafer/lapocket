@@ -5290,6 +5290,7 @@ static int execute(uint32_t pc);
 #define INSN_BRA					0xA000
 #define INSN_MOVB_R0_TO_AT_DISP_GBR	0xC000
 #define INSN_MOVW_R0_TO_AT_DISP_GBR	0xC100
+#define INSN_D_MOVLSG				0xC200
 #define INSN_I_TRAPA				0xC300
 #define INSN_I_MOVBLG				0xC400
 #define INSN_I_MOVWLG				0xC500
@@ -6261,6 +6262,11 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 		write_word(cpu.GBR + (d << 1), read_gp_register(0));
 		cpu.PC += 2;
 		return 0;
+	case INSN_D_MOVLSG:
+		d = insn & 0x00FFU;
+		write_longword(cpu.GBR + (d << 2), read_gp_register(0));
+		cpu.PC += 2;
+		return 0;
 	case INSN_I_TRAPA:
 		/* TODO: find all instructions that can't be in a delayed slot */
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
@@ -6982,6 +6988,10 @@ static void disassemble_d_format(uint32_t pc, uint16_t insn)
 	case INSN_MOVW_R0_TO_AT_DISP_GBR:
 		d = insn & 0x00FFU;
 		printf("MOV.W R0,@($%.2x,GBR)\n", d);
+		return;
+	case INSN_D_MOVLSG:
+		d = insn & 0x00FFU;
+		printf("MOV.L R0,@($%.2x,GBR)\n", d);
 		return;
 	case INSN_I_TRAPA:
 		i = insn & 0x00FFU;
