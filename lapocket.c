@@ -2955,16 +2955,34 @@ static bool is_scif_word_address(uint32_t addr)
 /* The only register for the Clock Pulse Generator */
 #define CPG_FRQCR_OFF	0xFFFFFF80
 
+struct cpg {
+	uint16_t FRQCR;		/* Frequency Control Register */
+} cpg = {
+	.FRQCR = 0x0102,
+};
+
 static bool is_cpg_word_address(uint32_t addr)
 {
 	return addr == CPG_FRQCR_OFF;
+}
+
+static uint16_t cpg_read_word_reg(uint32_t addr)
+{
+	switch (addr) {
+	case CPG_FRQCR_OFF:
+		return cpg.FRQCR;
+	default:
+		panic("BUG: nonexistent register for the clock pulse generator\n");
+		return 0;
+	}
 }
 
 static void cpg_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
 	case CPG_FRQCR_OFF:
-		/* TODO: actually implement this register? Does it matter? */
+		/* TODO: actually implement this register */
+		cpg.FRQCR = val;
 		return notice("CPG Frequency control register set to 0x%.4x\n", val);
 	default:
 		return panic("BUG: nonexistent register for the clock pulse generator\n");
@@ -4440,6 +4458,8 @@ static uint16_t read_word(uint32_t addr)
 		}
 		if (is_scif_word_address(addr))
 			return read_scif_word_reg(addr);
+		if (is_cpg_word_address(addr))
+			return cpg_read_word_reg(addr);
 		break;
 	}
 	panic("Attempted read of unknown address 0x%.8x\n", addr);
