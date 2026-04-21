@@ -2597,6 +2597,7 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 #define XB3A_020_OFF	0x13A00020
 #define XB3A_024_OFF	0x13A00024
 #define XB3A_028_OFF	0x13A00028
+#define XB3A_078_OFF	0x13A00078
 #define XB3A_07C_OFF	0x13A0007C
 #define XB3A_080_OFF	0x13A00080
 #define XB3A_084_OFF	0x13A00084
@@ -2686,6 +2687,7 @@ static void xB3A_write_byte_reg(uint32_t addr, uint8_t val)
 	case XB3A_020_OFF:
 	case XB3A_024_OFF:
 	case XB3A_028_OFF:
+	case XB3A_078_OFF:
 	case XB3A_07C_OFF:
 	case XB3A_080_OFF:
 	case XB3A_084_OFF:
