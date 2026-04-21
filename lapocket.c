@@ -6252,12 +6252,12 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 		cpu.PC = target;
 		return execute_delayed_slot(pc);
 	case INSN_MOVB_R0_TO_AT_DISP_GBR:
-		d = sign_extend_lower_8(insn);
+		d = insn & 0x00FFU;
 		write_byte(cpu.GBR + d, read_gp_register(0));
 		cpu.PC += 2;
 		return 0;
 	case INSN_MOVW_R0_TO_AT_DISP_GBR:
-		d = sign_extend_lower_8(insn);
+		d = insn & 0x00FFU;
 		write_word(cpu.GBR + (d << 1), read_gp_register(0));
 		cpu.PC += 2;
 		return 0;
@@ -6976,11 +6976,11 @@ static void disassemble_d_format(uint32_t pc, uint16_t insn)
 		printf("BF/S $%.8x\n", target - 4);
 		return;
 	case INSN_MOVB_R0_TO_AT_DISP_GBR:
-		d = sign_extend_lower_8(insn);
+		d = insn & 0x00FFU;
 		printf("MOV.B R0,@($%.2x,GBR)\n", d);
 		return;
 	case INSN_MOVW_R0_TO_AT_DISP_GBR:
-		d = sign_extend_lower_8(insn);
+		d = insn & 0x00FFU;
 		printf("MOV.W R0,@($%.2x,GBR)\n", d);
 		return;
 	case INSN_I_TRAPA:
@@ -7008,10 +7008,6 @@ static void disassemble_d_format(uint32_t pc, uint16_t insn)
 		printf("OR $%x,R0\n", i);
 		return;
 	case INSN_I_MOVBLG:
-		/*
-		 * TODO: what's up with the sign extension for GBR MOV instructions
-		 * in the opposite direction? Did I make a mistake?
-		 */
 		d = insn & 0x00FFU;
 		printf("MOV.B @($%.2x,GBR),R0\n", d);
 		return;
