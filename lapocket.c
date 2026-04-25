@@ -598,10 +598,10 @@ static void dump_all_monitors(void)
 /*
  * We have 16 MiB - 32 KiB of physical memory at address 0x8C008000, which is
  * actually in the P2 area mapped to physical address space so the top 3 bits
- * are ignored. Some simplifications are used here to avoid boundary checks.
+ * are ignored.
  */
 #define MEMORY_SIZE	(16 * 1024 * 1024)
-uint8_t memory[MEMORY_SIZE + 3] = {0};
+uint8_t memory[MEMORY_SIZE] = {0};
 #define MEMORY_OFF	0x0C000000
 #define MEMORY_MASK	(MEMORY_SIZE - 1)
 /*
@@ -614,8 +614,7 @@ uint8_t memory[MEMORY_SIZE + 3] = {0};
 /*
  * According to the display RAM self-tests, there are 512 KiB of memory at
  * address 0xb4200000; the first 75 KiB are for the framebuffer. This is
- * all in in the P2 area so the top 3 bits are ignored. Some simplifications
- * are used here to avoid boundary checks.
+ * all in in the P2 area so the top 3 bits are ignored.
  */
 #define DISPLAY_OFF			0x14000000
 #define	DISPLAY_FB_OFF		0x14200000
@@ -623,7 +622,7 @@ uint8_t memory[MEMORY_SIZE + 3] = {0};
 #define DISPLAY_RAM_SIZE	0x00080000
 struct display {
 	/* Framebuffer and display ram. TODO: what is the ram for? Rename this? */
-	uint8_t fb[DISPLAY_RAM_SIZE + 3];
+	uint8_t fb[DISPLAY_RAM_SIZE];
 } display = {0};
 
 enum i2c_state {
@@ -1723,11 +1722,10 @@ static uint8_t eeprom_receive_frame(void)
 
 /*
  * The firmware is 16 MiB at address 0x80000000, which is actually in the P1
- * area mapped to physical address space so the top bit is ignored. Some
- * simplifications are used here to avoid boundary checks.
+ * area mapped to physical address space so the top bit is ignored.
  */
 #define FIRMWARE_SIZE	(16 * 1024 * 1024)
-uint8_t firmware[FIRMWARE_SIZE + 3] = {0};
+uint8_t firmware[FIRMWARE_SIZE] = {0};
 #define FIRMWARE_OFF	0x00000000
 #define BOOTLOADER_OFF	0xA0000000
 #define FIRMWARE_MASK	(FIRMWARE_SIZE - 1)
@@ -1809,7 +1807,7 @@ struct bsc {
  * ignored.
  */
 #define PFC_REGS_SIZE	24
-uint8_t pfc_regs[PFC_REGS_SIZE + 3] = {0};
+uint8_t pfc_regs[PFC_REGS_SIZE] = {0};
 #define PFC_REGS_OFF	0x04000100
 
 #define PFC_PACR_OFF	0x04000100
@@ -2994,7 +2992,7 @@ static void cpg_write_word_reg(uint32_t addr, uint16_t val)
  * 0xFFFFFF84 - 0xFFFFFF87.
  */
 #define WDT_REGS_SIZE	4
-uint8_t wdt_regs[WDT_REGS_SIZE + 3] = {0};
+uint8_t wdt_regs[WDT_REGS_SIZE] = {0};
 #define WDT_REGS_OFF	0xFFFFFF84
 #define WDT_REGS_END	(WDT_REGS_OFF + WDT_REGS_SIZE)
 
@@ -4394,6 +4392,12 @@ static uint8_t read_byte(uint32_t addr)
 static uint16_t read_word(uint32_t addr)
 {
 	DEBUG_PRINT("Reading word from 0x%.8x\n", addr);
+
+	if (addr & 1) {
+		panic("Unaligned word read from 0x%.8x\n", addr);
+		return 0;
+	}
+
 	addr = mock_va_translation(addr);
 	addr = p1_p2_to_phys(addr);
 
@@ -4466,10 +4470,15 @@ static uint16_t read_word(uint32_t addr)
 	return 0;
 }
 
-/* TODO: address error for unaligned access in all such functions */
 static uint32_t read_longword(uint32_t addr)
 {
 	DEBUG_PRINT("Reading longword from 0x%.8x\n", addr);
+
+	if (addr & 3) {
+		panic("Unaligned longword read from 0x%.8x\n", addr);
+		return 0;
+	}
+
 	addr = mock_va_translation(addr);
 	addr = p1_p2_to_phys(addr);
 
@@ -4627,6 +4636,10 @@ static void write_byte(uint32_t addr, uint8_t val)
 static void write_word(uint32_t addr, uint16_t val)
 {
 	DEBUG_PRINT("Writing word 0x%.4x to 0x%.8x\n", val, addr);
+
+	if (addr & 1)
+		return panic("Unaligned word write to 0x%.8x\n", addr);
+
 	addr = mock_va_translation(addr);
 	addr = p1_p2_to_phys(addr);
 
@@ -4714,6 +4727,10 @@ static void write_word(uint32_t addr, uint16_t val)
 static void write_longword(uint32_t addr, uint32_t val)
 {
 	DEBUG_PRINT("Writing longword 0x%.8x to 0x%.8x\n", val, addr);
+
+	if (addr & 3)
+		return panic("Unaligned longword write to 0x%.8x\n", addr);
+
 	addr = mock_va_translation(addr);
 	addr = p1_p2_to_phys(addr);
 
