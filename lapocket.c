@@ -4096,11 +4096,20 @@ static void tmu_write_word_reg(uint32_t addr, uint16_t val)
 static void tmu_write_longword_reg(uint32_t addr, uint32_t val)
 {
 	switch (addr) {
+	case TMU_TCOR0_OFF:
+		tmu.TCOR[0] = val;
+		break;
 	case TMU_TCNT0_OFF:
 		tmu.TCNT[0] = val;
 		break;
+	case TMU_TCOR1_OFF:
+		tmu.TCOR[1] = val;
+		break;
 	case TMU_TCNT1_OFF:
 		tmu.TCNT[1] = val;
+		break;
+	case TMU_TCOR2_OFF:
+		tmu.TCOR[2] = val;
 		break;
 	case TMU_TCNT2_OFF:
 		tmu.TCNT[2] = val;
