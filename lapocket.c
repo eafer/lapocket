@@ -2226,6 +2226,9 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 		if ((*reg ^ val) & PFC_PJ3_MASK) {
 			if ((val & PFC_PJ3_MASK) == PFC_PJ3MD0) {
 				ioports.PJDR & 0x08 ? i2c_pull_up_scl() : i2c_pull_down_scl();
+			} else if ((val & PFC_PJ3_MASK) == 0) {
+				/* How is this possible? Is the EEPROM disabled by now? TODO */
+				notice("Pin PJ3 set to \"CASLH/CASU output (BSC)\"\n");
 			} else {
 				panic("Unsupported PJ3 configuration 0x%.4x\n", val);
 				return;
