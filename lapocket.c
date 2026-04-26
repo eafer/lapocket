@@ -148,6 +148,7 @@ static bool is_motherboard_word_address(uint32_t addr)
 	case 0x12000044:
 	case 0x12000068:
 	case 0x1200006c:
+	case 0x12000098:
 		return true;
 	default:
 		return false;
@@ -1396,6 +1397,7 @@ static uint16_t motherboard_read_word_reg(uint32_t addr)
 	case 0x12000000:
 	case 0x12000014:
 	case 0x12000044:
+	case 0x12000098:
 		/* No idea about these but keep going for now (TODO) */
 		notice("Reading from unknown motherboard register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
 		return 0;
@@ -1417,8 +1419,12 @@ static void motherboard_write_word_reg(uint32_t addr, uint16_t val)
 			motherboard.status |= MBOARD_NOT_BLINKING;
 			break;
 		case 0x8000:
+		case 0x2000:
 		case 0x0800:
 		case 0x0200:
+		case 0x0080:
+		case 0x0008:
+		case 0x0002:
 			return notice("Ignoring unknown motherboard command 0x%.4x (PC: 0x%.8x)\n", val, cpu.PC);
 		default:
 			return panic("Unsupported motherboard command 0x%.4x\n", val);
@@ -1433,6 +1439,7 @@ static void motherboard_write_word_reg(uint32_t addr, uint16_t val)
 	case 0x12000068:
 	case 0x12000014:
 	case 0x12000044:
+	case 0x12000098:
 		/* No idea about these but keep going for now (TODO) */
 	case 0x12000000:
 	case 0x12000030:
