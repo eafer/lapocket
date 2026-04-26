@@ -2458,7 +2458,7 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 			write_flag_to_byte(&touchscreen.state, TOUCH_STATE_SCP1DT, val & 0x02);
 		else
 			return panic("Unsupported configuration for Port SC (0x%.4x)\n", control);
-		ioports.PJDR = val;
+		ioports.SCPDR = val;
 		return;
 	default:
 		panic("Attempted write to unsupported IO register at 0x%.8x\n", addr);
