@@ -4075,8 +4075,12 @@ static void tmu_write_word_reg(uint32_t addr, uint16_t val)
 	case TMU_TCR0_OFF:
 	case TMU_TCR1_OFF:
 		val &= TCR_0_1_BIT_MASK;
-		if (val & (TCR_CKEG | TCR_TPSC)) {
+		if (val & TCR_CKEG) {
 			panic("Unsupported timer configuration for TCR (0x%.2x)\n", val);
+			return;
+		}
+		if ((val & TCR_TPSC) & 4) {
+			panic("Unsupported TCNT clock input (TCR: 0x%.2x)\n", val);
 			return;
 		}
 		preserved_bits = val & TCR_UNSETTABLE_MASK;
@@ -7540,6 +7544,18 @@ static void decrement_tmu_tcnt(int i)
 	}
 }
 
+/* Get the prescale value for the TCNT0-2 clocks */
+static int tmu_prescaler(int i)
+{
+	int tpsc, result;
+
+	result = 4;
+	tpsc = tmu.TCR[i] & TCR_TPSC;
+	while (tpsc--)
+		result <<= 2;
+	return result;
+}
+
 /*
  * We want the tests to be deterministic so, when running headless, the clock
  * update frequency is arbitrarily synced to the execution loop. All that
@@ -7568,18 +7584,12 @@ static void update_clocks(void)
 	for (i = 0; i < 3; ++i) {
 		if ((tmu.TSTR & (1U << i)) == 0)	/* Is this timer halted? */
 			continue;
-		switch (tmu.TCR[i] & TCR_TPSC) {
-		case 0x0000:
-			tmu.peripheral_tics[i] += 4;
-			if (tmu.peripheral_tics[i] >= 4) {
-				tmu.peripheral_tics[i] = 0;
-				decrement_tmu_tcnt(i);
-			}
-			break;
-		default:
-			panic("TCNT clock input 0x%x not implemented\n", tmu.TCR[i] & TCR_TPSC);
-			return;
+		tmu.peripheral_tics[i] += 4;
+		if (tmu.peripheral_tics[i] >= tmu_prescaler(i)) {
+			tmu.peripheral_tics[i] = 0;
+			decrement_tmu_tcnt(i);
 		}
+		break;
 	}
 
 	/*
