@@ -3282,6 +3282,17 @@ static void cache_write_longword_reg(uint32_t addr, uint32_t val)
 	}
 }
 
+static uint32_t cache_read_longword_reg(uint32_t addr)
+{
+	switch (addr) {
+	case CACHE_CCR_OFF:
+		return cache.CCR;
+	default:
+		panic("Attempted read from unsupported cache register at 0x%.8x\n", addr);
+		return 0;
+	}
+}
+
 /*
  * The registers for the Timer Unit are accessed through bytes, words and
  * longwords in address range 0xFFFFFE90-0xFFFFFEBB.
@@ -4804,6 +4815,8 @@ static uint32_t read_longword(uint32_t addr)
 			return dmac_read_longword_reg(addr);
 		if (is_mmu_longword_address(addr))
 			return mmu_read_longword_reg(addr);
+		if (is_cache_longword_address(addr))
+			return cache_read_longword_reg(addr);
 	}
 	panic("Attempted read of unknown address 0x%.8x\n", addr);
 	return 0;
