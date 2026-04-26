@@ -3378,6 +3378,272 @@ static bool is_tmu_longword_address(uint32_t addr)
 	}
 }
 
+/* The registers for the Memory Management Unit */
+#define MMU_PTEH_OFF		0xFFFFFFF0
+#define MMU_PTEL_OFF		0xFFFFFFF4
+#define MMU_TTB_OFF			0xFFFFFFF8
+#define MMU_TEA_OFF			0xFFFFFFFC
+#define MMU_MMUCR_OFF		0xFFFFFFE0
+/* The TLB can also be accessed through these arrays */
+#define MMU_TLB_ADDR_OFF	0xF2000000
+#define MMU_TLB_ADDR_LEN	0x01000000
+#define MMU_TLB_DATA_OFF	0xF3000000
+#define MMU_TLB_DATA_LEN	0x01000000
+
+struct mmu {
+	uint32_t PTEH;		/* Page table entry register high */
+	uint32_t PTEL;		/* Page table entry register low */
+	uint32_t TTB;		/* Translation table base register */
+	uint32_t TEA;		/* TLB exception address register */
+	uint32_t MMUCR;		/* MMU control register */
+
+	/* The actual TLB, split in address and data arrays */
+	uint32_t tlb_addr[32][4];
+	uint32_t tlb_data[32][4];
+} mmu = {0};
+
+/* Fields of the PTEH register */
+#define PTEH_VPN_MASK	0xFFFFFC00	/* Virtual page number */
+#define PTEH_VPN_SHIFT	10
+#define PTEH_ASID_MASK	0x000000FF	/* Address space identifier */
+#define PTEH_ASID_SHIFT	0
+#define PTEH_BIT_MASK	(PTEH_VPN_MASK | PTEH_ASID_MASK)
+
+/* Fields of the PTEL register */
+#define PTEL_PPN_MASK	0xFFFFFC00	/* Physical page number */
+#define PTEL_PPN_SHIFT	10
+#define PTEL_V			(1U << 8)	/* Valid bit */
+#define PTEL_PR_MASK	(3U << 5)	/* Protection key */
+#define PTEL_PR_SHIFT	5
+#define PTEL_SZ			(1U << 4)	/* Size bit */
+#define PTEL_C			(1U << 3)	/* Cacheable bit */
+#define PTEL_D			(1U << 2)	/* Dirty bit */
+#define PTEL_SH			(1U << 1)	/* Share status bit */
+#define PTEL_BIT_MASK	(PTEL_PPN_MASK | PTEL_V | PTEL_PR_MASK| PTEL_SZ | PTEL_C | PTEL_D | PTEL_SH)
+
+/* Fields of the MMUCR register */
+#define MMUCR_SV		(1U << 8)	/* Single virtual memory mode bit */
+#define MMUCR_RC_MASK	(3U << 4)	/* Random counter */
+#define MMUCR_RC_SHIFT	4
+#define MMUCR_TF		(1U << 2)	/* TLB flush bit */
+#define MMUCR_IX		(1U << 1)	/* Index mode bit */
+#define MMUCR_AT		(1U << 0)	/* Address translation bit */
+#define MMUCR_BIT_MASK	(MMUCR_SV | MMUCR_RC_MASK | MMUCR_TF | MMUCR_IX | MMUCR_AT)
+
+/* Fields of each TLB address entry */
+#define TLB_VPN_31_17_MASK	(0x007FFFU << 13)	/* Virtual page number (bits 31-17) */
+#define TLB_VPN_31_17_SHIFT	13
+#define TLB_VPN_11_10_MASK	(0x000003U << 11)	/* Virtual page number (bits 11-10) */
+#define TLB_VPN_11_10_SHIFT	11
+#define TLB_ASID_MASK		(0x0000FFU << 3)	/* Address space identifier */
+#define TLB_ASID_SHIFT		3
+#define TLB_SH				(0x000001U << 2)	/* Share status bit */
+#define TLB_SZ				(0x000001U << 1)	/* Page-size bit */
+#define TLB_V				(0x000001U << 0)	/* Valid bit */
+
+/* Fields of each TLB data entry */
+#define TLB_PPN_MASK		(0x3FFFFFU << 4)	/* Physical page number (top 22 bits) */
+#define TLB_PPN_SHIFT		4
+#define TLB_PR_MASK			(0x000003U << 2)	/* Protection key field */
+#define TLB_PR_SHIFT		2
+#define TLB_C				(0x000001U << 1)	/* Cacheable bit */
+#define TLB_D				(0x000001U << 0)	/* Dirty bit */
+
+static bool is_mmu_longword_address(uint32_t addr)
+{
+	if (addr >= MMU_TLB_ADDR_OFF && addr < MMU_TLB_ADDR_OFF + MMU_TLB_ADDR_LEN)
+		return true;
+	if (addr >= MMU_TLB_DATA_OFF && addr < MMU_TLB_DATA_OFF + MMU_TLB_DATA_LEN)
+		return true;
+	switch (addr) {
+	case MMU_PTEH_OFF:
+	case MMU_PTEL_OFF:
+	case MMU_TTB_OFF:
+	case MMU_TEA_OFF:
+	case MMU_MMUCR_OFF:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void mmu_flush_tlb(void)
+{
+	int way, entry;
+
+	for (way = 0; way < 4; ++way) {
+		for (entry = 0; entry < 32; ++entry)
+			mmu.tlb_addr[entry][way] &= ~TLB_V;
+	}
+}
+
+/* Extract bits 16-12 of the virtual address to be used as the TLB index */
+static int mmu_virt_to_index(uint32_t va)
+{
+	return (va >> 12) & 0x1F;
+}
+
+static void mmu_load_pte_to_tlb(void)
+{
+	uint32_t tlb_addr, tlb_data;
+	uint32_t *tlb_addr_p = NULL, *tlb_data_p = NULL;
+	int way, entry;
+	uint32_t virt_addr, phys_addr, asid, protection;
+
+	/* We always assume 1 KiB page size */
+	virt_addr = mmu.PTEH & PTEH_VPN_MASK;
+	phys_addr = mmu.PTEL & PTEL_PPN_MASK;
+	asid = (mmu.PTEH & PTEH_ASID_MASK) >> PTEH_ASID_SHIFT;
+	protection = (mmu.PTEL & PTEL_PR_MASK) >> PTEL_PR_SHIFT;
+
+	way = (mmu.MMUCR & MMUCR_RC_MASK) >> MMUCR_RC_SHIFT;
+	entry = mmu_virt_to_index(virt_addr);
+
+	tlb_addr_p = &mmu.tlb_addr[entry][way];
+	tlb_data_p = &mmu.tlb_data[entry][way];
+
+	/* Each TLB address entry has 28 bits */
+	tlb_addr = 0;
+	tlb_addr |= (virt_addr >> 4) & TLB_VPN_31_17_MASK;
+	tlb_addr |= (virt_addr << 1) & TLB_VPN_11_10_MASK;
+	tlb_addr |= asid << 3;
+	if (mmu.PTEL & PTEL_SH)
+		tlb_addr |= TLB_SH;
+	if (mmu.PTEL & PTEL_SZ)
+		return panic("4 KiB page size not supported\n");
+	if (mmu.PTEL & PTEL_V)
+		tlb_addr |= TLB_V;
+
+	/* Each TLB data entry has 26 bits */
+	tlb_data = 0;
+	tlb_data |= phys_addr >> 6;
+	tlb_data |= protection << 2;
+	if (mmu.PTEL & PTEL_C)
+		tlb_data |= TLB_C;
+	if (mmu.PTEL & PTEL_D)
+		return panic("Attempt to dirty a page\n");
+
+	*tlb_addr_p = tlb_addr;
+	*tlb_data_p = tlb_data;
+}
+
+static void mmu_write_longword_reg(uint32_t addr, uint32_t val)
+{
+	switch (addr) {
+	case MMU_PTEH_OFF:
+		mmu.PTEH = val & PTEH_BIT_MASK;
+		break;
+	case MMU_PTEL_OFF:
+		mmu.PTEL = val & PTEL_BIT_MASK;
+		break;
+	case MMU_TTB_OFF:
+		mmu.TTB = val;
+		break;
+	case MMU_TEA_OFF:
+		mmu.TEA = val;
+		break;
+	case MMU_MMUCR_OFF:
+		if (val & MMUCR_TF)
+			mmu_flush_tlb();
+		/* I only support the configuration used by my Jornada's firmware */
+		if (val & MMUCR_SV)
+			return panic("MMU single vm mode not supported (0x%.8x)\n", val);
+		if (val & MMUCR_IX)
+			return panic("MMU index mode 1 not supported (0x%.8x)\n", val);
+		/*
+		 * According to the manual, the reserved bits in the MMUCR are special
+		 * in that "0 should also be specified in a write to MMUCR only". No
+		 * idea what that means, so I'll just ignore those bits as usual.
+		 */
+		mmu.MMUCR = val & MMUCR_BIT_MASK;
+		break;
+	default:
+		panic("Attempted write to unsupported MMU register at 0x%.8x\n", addr);
+		return;
+	}
+}
+
+static uint32_t mmu_read_longword_reg(uint32_t addr)
+{
+	switch (addr) {
+	case MMU_PTEH_OFF:
+		return mmu.PTEH;
+	default:
+		panic("Attempted read from unsupported MMU register at 0x%.8x\n", addr);
+		return 0;
+	}
+}
+
+/* Offset of each of the virtual memory areas P0 to P4 */
+static uint32_t mmu_area_offs[] = {
+	0x00000000,
+	0x80000000,
+	0xA0000000,
+	0xC0000000,
+	0xE0000000
+};
+
+static int mmu_virt_to_area(uint32_t va)
+{
+	int i;
+
+	for (i = 4; i >= 0; --i) {
+		if (va >= mmu_area_offs[i])
+			return i;
+	}
+	panic("BUG: va not covered by any area\n");
+	return 0;
+}
+
+static uint32_t mmu_tlb_to_va(uint32_t tlb_addr, int index)
+{
+	uint32_t va;
+
+	va = 0;
+	va |= (tlb_addr & TLB_VPN_31_17_MASK) << (17 - TLB_VPN_31_17_SHIFT);
+	va |= index << 12;	/* The index are bits 16-12 */
+	va |= (tlb_addr & TLB_VPN_11_10_MASK) >> (TLB_VPN_11_10_SHIFT - 10);
+	return va;
+}
+
+static uint32_t mmu_tlb_to_pa(uint32_t tlb_data)
+{
+	return (tlb_data & TLB_PPN_MASK) << (10 - TLB_PPN_SHIFT);
+}
+
+#define PAGE_MASK	(~((1 << 10) - 1))
+
+/* TODO: handle overlaps between mmu and debugger mappings */
+static uint32_t mmu_virt_to_phys(uint32_t va)
+{
+	int area, entry, way;
+	uint32_t tlb_addr, tlb_data, vpage_addr;
+
+	/* No translation if the mmu is disabled */
+	if (!(mmu.MMUCR & MMUCR_AT))
+		return va;
+
+	/* Only vm areas P0 and P3 get translated */
+	area = mmu_virt_to_area(va);
+	if (area != 0 && area != 3)
+		return va;
+
+	vpage_addr = va & PAGE_MASK;
+
+	/* TODO: check protections and process privilege */
+	entry = mmu_virt_to_index(va);
+	for (way = 0; way < 4; ++way) {
+		tlb_addr = mmu.tlb_addr[entry][way];
+		tlb_data = mmu.tlb_data[entry][way];
+		if (!(tlb_addr & TLB_V))
+			continue;
+		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr)
+			return mmu_tlb_to_pa(tlb_data) + (va - vpage_addr);
+	}
+
+	panic("Page faults not yet implemented\n");
+	return 0;
+}
 
 
 
@@ -4317,6 +4583,7 @@ static uint8_t read_byte(uint32_t addr)
 {
 	DEBUG_PRINT("Reading byte from 0x%.8x\n", addr);
 	addr = mock_va_translation(addr);
+	addr = mmu_virt_to_phys(addr);
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
@@ -4399,6 +4666,7 @@ static uint16_t read_word(uint32_t addr)
 	}
 
 	addr = mock_va_translation(addr);
+	addr = mmu_virt_to_phys(addr);
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
@@ -4480,6 +4748,7 @@ static uint32_t read_longword(uint32_t addr)
 	}
 
 	addr = mock_va_translation(addr);
+	addr = mmu_virt_to_phys(addr);
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
@@ -4533,6 +4802,8 @@ static uint32_t read_longword(uint32_t addr)
 			return except_read_longword_reg(addr);
 		if (is_dmac_longword_address(addr))
 			return dmac_read_longword_reg(addr);
+		if (is_mmu_longword_address(addr))
+			return mmu_read_longword_reg(addr);
 	}
 	panic("Attempted read of unknown address 0x%.8x\n", addr);
 	return 0;
@@ -4542,6 +4813,7 @@ static void write_byte(uint32_t addr, uint8_t val)
 {
 	DEBUG_PRINT("Writing byte 0x%.2x to 0x%.8x\n", val, addr);
 	addr = mock_va_translation(addr);
+	addr = mmu_virt_to_phys(addr);
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
@@ -4641,6 +4913,7 @@ static void write_word(uint32_t addr, uint16_t val)
 		return panic("Unaligned word write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
+	addr = mmu_virt_to_phys(addr);
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
@@ -4732,6 +5005,7 @@ static void write_longword(uint32_t addr, uint32_t val)
 		return panic("Unaligned longword write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
+	addr = mmu_virt_to_phys(addr);
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
@@ -4788,6 +5062,8 @@ static void write_longword(uint32_t addr, uint32_t val)
 			return dmac_write_longword_reg(addr, val);
 		if (is_cache_longword_address(addr))
 			return cache_write_longword_reg(addr, val);
+		if (is_mmu_longword_address(addr))
+			return mmu_write_longword_reg(addr, val);
 		break;
 	}
 	panic("Attempted write to unknown address 0x%.8x (value: 0x%.8x)\n", addr, val);
@@ -5236,6 +5512,7 @@ static int execute(uint32_t pc);
 #define INSN_N_MOVT					0x0029
 #define INSN_0_RTS					0x000B
 #define INSN_0_RTE					0x002B
+#define INSN_0_LDTLB				0x0038
 #define INSN_NM_MOVBL0				0x000C
 #define INSN_M_BRAF_RM				0x0023
 #define INSN_MOVL_RM_TO_AT_DISP_RN	0x1000
@@ -5401,6 +5678,10 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 		 * that shouldn't matter. Strangely, the manual claims that the PC
 		 * should be reduced by 2... no idea.
 		 */
+		return 0;
+	case INSN_0_LDTLB:
+		mmu_load_pte_to_tlb();
+		cpu.PC += 2;
 		return 0;
 	}
 
@@ -6595,6 +6876,9 @@ static void disassemble_0_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_0_SLEEP:
 		printf("SLEEP\n");
+		return;
+	case INSN_0_LDTLB:
+		printf("LDTLB\n");
 		return;
 	}
 	printf("0 format instruction 0x%x not implemented\n", insn);

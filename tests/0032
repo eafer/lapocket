@@ -1,0 +1,13 @@
+# Runs the function that performs the initial setup of the MMU and verifies
+# that the address translation is working
+
+set R15 0x0C001000 # Mock a stack somewhere
+set PC 0x8005615C
+break 0x800561F6
+run
+
+# Dump the page table, first from physical memory and then from virtual memory
+xxd 0x8C009800 0x400
+xxd 0x00005800 0x400
+
+exit
