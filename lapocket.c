@@ -2473,6 +2473,7 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 
 	val = 0;
 
+	/* For now we just read zero for all unsupported pins (TODO) */
 	switch (addr) {
 	case IOPORTS_PCDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PCCR_OFF - PFC_REGS_OFF));
@@ -2497,7 +2498,12 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			panic("Unsupported configuration for Port D (0x%.4x)\n", control);
 			return 0;
 		}
-		/* For now we just read zero for all unsupported pins (TODO) */
+		if (!(control & PFC_PD3MD1))
+			write_flag_to_byte(&val, 1U << 3, ioports.PDDR & (1U << 3));
+		if (!(control & PFC_PD5MD1))
+			write_flag_to_byte(&val, 1U << 5, ioports.PDDR & (1U << 5));
+		if (!(control & PFC_PD7MD1))
+			write_flag_to_byte(&val, 1U << 7, ioports.PDDR & (1U << 7));
 		return val;
 	case IOPORTS_PEDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PECR_OFF - PFC_REGS_OFF));
@@ -2527,7 +2533,12 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			write_flag_to_byte(&val, 1U << 1, 0);
 		else
 			panic("Unsupported configuration for Port E (0x%.4x)\n", control);
-		/* For now we just read zero for all unsupported pins (TODO) */
+		if (!(control & PFC_PE3MD1))
+			write_flag_to_byte(&val, 1U << 3, ioports.PEDR & (1U << 3));
+		if (!(control & PFC_PE5MD1))
+			write_flag_to_byte(&val, 1U << 5, ioports.PEDR & (1U << 5));
+		if (!(control & PFC_PE7MD1))
+			write_flag_to_byte(&val, 1U << 7, ioports.PEDR & (1U << 7));
 		return val;
 	case IOPORTS_PFDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PFCR_OFF - PFC_REGS_OFF));
@@ -2542,20 +2553,22 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 		write_flag_to_byte(&val, 1U << (10 - 8), !(button_state & BUTTON_ENTER_PUSHED));
 		write_flag_to_byte(&val, 1U << (9 - 8), !(button_state & BUTTON_DOWN_PUSHED));
 		write_flag_to_byte(&val, 1U << (8 - 8), !(button_state & BUTTON_UP_PUSHED));
-		/* For now we just read zero for all unsupported pins (TODO) */
 		return val;
 	case IOPORTS_PGDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PGCR_OFF - PFC_REGS_OFF));
+		if (!(control & PFC_PG5MD1))
+			write_flag_to_byte(&val, 1U << 5, false);
 		if (control & PFC_PG2MD1)
 			write_flag_to_byte(&val, 1U << 2, !(button_state & BUTTON_QL2_PUSHED));
 		if (control & PFC_PG1MD1)
 			write_flag_to_byte(&val, 1U << 1, !(button_state & BUTTON_QL3_PUSHED));
 		if (control & PFC_PG0MD1)
 			write_flag_to_byte(&val, 1U << 0, !(button_state & BUTTON_QL4_PUSHED));
-		/* For now we just read zero for all unsupported pins (TODO) */
 		return val;
 	case IOPORTS_PHDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PHCR_OFF - PFC_REGS_OFF));
+		if (!(control & PFC_PH1MD1))
+			write_flag_to_byte(&val, 1U << 1, false);
 		if ((control & PFC_PH3_MASK) == (PFC_PH3MD0 | PFC_PH3MD1)) {
 			/* This reads the value of the IRQ3 pin */
 			write_flag_to_byte(&val, 1U << 3, touchscreen.x >= 0);
@@ -2563,14 +2576,24 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			panic("Unsupported configuration for Port H (0x%.4x)\n", control);
 			return 0;
 		}
-		/* For now we just read zero for all unsupported pins (TODO) */
+		if (!(control & PFC_PH5MD1))
+			write_flag_to_byte(&val, 1U << 5, false);
+		if (!(control & PFC_PH7MD1))
+			write_flag_to_byte(&val, 1U << 7, ioports.PHDR & (1U << 7));
 		return val;
 	case IOPORTS_PJDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PJCR_OFF - PFC_REGS_OFF));
-		/* For now we just read zero for all unsupported pins (TODO) */
+		if (!(control & PFC_PJ1MD1))
+			write_flag_to_byte(&val, 1U << 1, ioports.PJDR & (1U << 1));
 		if (control & PFC_PJ3MD1)
-			return i2c.scl ? 0x08 : 0;
-		return ioports.PJDR & 0x08;
+			val |= i2c.scl ? 0x08 : 0;
+		else
+			write_flag_to_byte(&val, 1U << 3, ioports.PJDR & (1U << 3));
+		if (!(control & PFC_PJ4MD1))
+			write_flag_to_byte(&val, 1U << 4, ioports.PJDR & (1U << 4));
+		if (!(control & PFC_PJ5MD1))
+			write_flag_to_byte(&val, 1U << 5, ioports.PJDR & (1U << 5));
+		return val;
 	case IOPORTS_SCPDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_SCPCR_OFF - PFC_REGS_OFF));
 		if ((control & PFC_SCP0_MASK) == PFC_SCP0MD0) {
@@ -2585,7 +2608,10 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			panic("Unsupported configuration for Port SC (0x%.4x)\n", control);
 			return 0;
 		}
-		/* For now we just read zero for all unsupported pins (TODO) */
+		if (!(control & PFC_SCP3MD1))
+			write_flag_to_byte(&val, 1U << 3, ioports.SCPDR & (1U << 3));
+		if (!(control & PFC_SCP6MD1))
+			write_flag_to_byte(&val, 1U << 6, ioports.SCPDR & (1U << 6));
 		return val;
 	default:
 		panic("Attempted read from unsupported IO register at 0x%.8x\n", addr);
