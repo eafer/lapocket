@@ -556,6 +556,147 @@ enum pin_sense_mode {
 	high	= 0x0003,
 };
 
+/*
+ * The Jornada 545 has a PHILIPS PDIUSBD12 usb interface device. I don't really
+ * want usb so I'm trying to implement as little as possible. Luckily a manual
+ * is available.
+ */
+#define USB_DATA_OFF			0x0BC00000
+#define USB_COMMANDS_OFF		0x0BC00004
+
+/* USB commands encountered so far */
+/* Read last transaction status for each endpoint */
+#define USB_CTRLOUT_READ_STATUS		0x40	/* Control OUT */
+#define USB_CTRLIN_READ_STATUS		0x41	/* Control IN */
+#define USB_END1OUT_READ_STATUS		0x42	/* Endpoint 1 OUT */
+#define USB_END1IN_READ_STATUS		0x43	/* Endpoint 1 IN */
+#define USB_END2OUT_READ_STATUS		0x44	/* Endpoint 2 OUT */
+#define USB_END2IN_READ_STATUS		0x45	/* Endpoint 2 IN */
+#define USB_SET_END_ENABLE			0xD8	/* Set endpoint enable */
+#define USB_READ_INTR				0xF4	/* Read interrupt register */
+#define USB_SET_DMA					0xFB
+/* The manual doesn't list an FF command, so I'll use that as a NULL */
+#define USB_NO_COMMAND			0xFF
+
+struct usb {
+	uint8_t command;	/* Command in execution */
+	uint8_t buf_off;
+	uint8_t buf_end;
+	uint8_t buf[130];
+} usb = {
+	.command = USB_NO_COMMAND,
+};
+
+static bool is_usb_byte_address(uint32_t addr)
+{
+	switch (addr) {
+	case USB_DATA_OFF:
+	case USB_COMMANDS_OFF:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void usb_execute_command(void)
+{
+	uint8_t byte;
+
+	switch (usb.command) {
+	case USB_SET_DMA:
+		byte = usb.buf[0];
+		if (byte)
+			panic("USB DMA operation not supported\n");
+		break;
+	case USB_SET_END_ENABLE:
+		byte = usb.buf[0];
+		if (byte)
+			panic("USB generic/isochronous endpoints not supported\n");
+		break;
+	default:
+		panic("BUG: executing unsupported usb command 0x%.2x\n", usb.command);
+	}
+
+	usb.buf_off = 0;
+	usb.buf_end = 0;
+	usb.command = USB_NO_COMMAND;
+}
+
+static uint8_t usb_command_to_trans_len(uint8_t command)
+{
+	switch (command) {
+	case USB_CTRLOUT_READ_STATUS:
+	case USB_CTRLIN_READ_STATUS:
+	case USB_END1OUT_READ_STATUS:
+	case USB_END1IN_READ_STATUS:
+	case USB_END2OUT_READ_STATUS:
+	case USB_END2IN_READ_STATUS:
+	case USB_SET_END_ENABLE:
+	case USB_SET_DMA:
+		return 1;
+	case USB_READ_INTR:
+		return 2;
+	default:
+		panic("BUG: accepting unsupported usb command 0x%.2x\n", usb.command);
+		return 0;
+	}
+}
+
+static void usb_write_byte_reg(uint32_t addr, uint8_t val)
+{
+	switch (addr) {
+	case USB_COMMANDS_OFF:
+		switch (val) {
+		case USB_CTRLOUT_READ_STATUS:
+		case USB_CTRLIN_READ_STATUS:
+		case USB_END1OUT_READ_STATUS:
+		case USB_END1IN_READ_STATUS:
+		case USB_END2OUT_READ_STATUS:
+		case USB_END2IN_READ_STATUS:
+		case USB_SET_END_ENABLE:
+		case USB_READ_INTR:
+		case USB_SET_DMA:
+			usb.buf_off = 0;
+			usb.buf_end = usb_command_to_trans_len(val);
+			usb.command = val;
+			break;
+		default:
+			return panic("Unsupported usb command 0x%.2x\n", val);
+		}
+		return;
+	case USB_DATA_OFF:
+		if (usb.buf_off == usb.buf_end)
+			return panic("Input too long for usb command 0x%.2x\n", usb.command);
+		usb.buf[usb.buf_off++] = val;
+		if (usb.buf_off == usb.buf_end)
+			return usb_execute_command();
+		return;
+	default:
+		return panic("Attempted write of 0x%.2x to unsupported usb register at 0x%.8x\n", val, addr);
+	}
+}
+
+static uint8_t usb_read_byte_reg(uint32_t addr)
+{
+	switch (addr) {
+	case USB_DATA_OFF:
+		if (usb.buf_off++ == usb.buf_end) {
+			panic("Too many reads for usb command 0x%.2x\n", usb.command);
+			return 0;
+		}
+		/*
+		 * Early on boot, the firmware runs status reads on all endpoints and
+		 * reads the interrupt register. The values aren't checked, so I think
+		 * the point is to clear interrupts. I don't even keep track of the usb
+		 * interrupt register, so for now do nothing and just return zero.
+		 */
+		return 0;
+	default:
+		panic("Attempted read from unsupported usb register at 0x%.8x\n", addr);
+		return 0;
+	}
+}
+
 enum monitor {
 	MONITOR_NONE,
 	MONITOR_SERIAL,
@@ -2648,6 +2789,7 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 #define XB3A_1E0_OFF	0x13A001E0
 #define XB3A_1F0_OFF	0x13A001F0
 #define XB3A_1F8_OFF	0x13A001F8
+#define USB_UNKCNT_OFF	0x13A00408
 
 static void console_monitor_dump(struct console_monitor *mon)
 {
@@ -2739,6 +2881,25 @@ static void xB3A_write_byte_reg(uint32_t addr, uint8_t val)
 		return;
 	case XB3A_18C_OFF:
 		return console_monitor_save_byte(&xB3A_monitor, val);
+	default:
+		panic("Attempted write to unsupported xB3A register at 0x%.8x\n", addr);
+		return;
+	}
+}
+
+static void xB3A_write_word_reg(uint32_t addr, uint8_t val)
+{
+	switch (addr) {
+	case USB_UNKCNT_OFF:
+		/*
+		 * No idea what this is, but the firmware writes sequential numbers to
+		 * it after interacting with usb registers. I'm guessing some sort of
+		 * delay? If that's the case, then it can be safely ignored here. It's
+		 * interesting that it's the only register in this range that gets
+		 * accessed as a word, I'm guessing it's not actually part of the same
+		 * device or whatever.
+		 */
+		return;
 	default:
 		panic("Attempted write to unsupported xB3A register at 0x%.8x\n", addr);
 		return;
@@ -4650,6 +4811,10 @@ static uint8_t read_byte(uint32_t addr)
 	case FIRMWARE_OFF:
 	case BOOTLOADER_OFF:
 		return *(uint8_t *)(firmware + (addr & FIRMWARE_MASK));
+	case 0x0B000000:
+		if (is_usb_byte_address(addr))
+			return usb_read_byte_reg(addr);
+		break;
 	case MEMORY_OFF:
 	case MEMORY_SHADOW:
 		return *(uint8_t *)(memory + (addr & MEMORY_MASK));
@@ -4883,6 +5048,10 @@ static void write_byte(uint32_t addr, uint8_t val)
 	case BOOTLOADER_OFF:
 		panic("Attempted write to firmware address! (0x%.8x)\n", addr);
 		return;
+	case 0x0B000000:
+		if (is_usb_byte_address(addr))
+			return usb_write_byte_reg(addr, val);
+		break;
 	case MEMORY_OFF:
 	case MEMORY_SHADOW:
 #if 0
@@ -5004,6 +5173,8 @@ static void write_word(uint32_t addr, uint16_t val)
 			return;
 		}
 		return motherboard_write_word_reg(addr, val);
+	case 0x13000000:
+		return xB3A_write_word_reg(addr, val);
 	case 0x18000000:
 	case 0x1A000000:
 		if (is_cfcard_ata_word_address(addr))
