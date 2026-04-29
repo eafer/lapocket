@@ -4820,8 +4820,12 @@ static uint8_t read_byte(uint32_t addr)
 	case MEMORY_SHADOW:
 		return *(uint8_t *)(memory + (addr & MEMORY_MASK));
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
+		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
 			panic("Unsupported display register 0x%.8x\n", addr);
+			return 0;
+		}
+		if (addr < DISPLAY_FB_OFF) {
+			notice("Reading from unknown display register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
 			return 0;
 		}
 		return display.fb[addr - DISPLAY_FB_OFF];
