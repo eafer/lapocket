@@ -4374,6 +4374,7 @@ static void pdm_write_byte_reg(uint32_t addr, uint8_t val)
 		notice("Clock supply to ADC is %s\n", val & STBCR2_MSTP5 ? "halted" : "running");
 		notice("Clock supply to SCIF is %s\n", val & STBCR2_MSTP4 ? "halted" : "running");
 		notice("Clock supply to IrDA is %s\n", val & STBCR2_MSTP3 ? "halted" : "running");
+		pdm.STBCR2 = val;
 		return;
 	default:
 		return panic("Attempted write to unsupported pdm register at 0x%.8x\n", addr);
