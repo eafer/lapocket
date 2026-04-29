@@ -186,7 +186,10 @@ struct touchscreen {
 	int y;
 
 	uint8_t state;	/* SCP0DT:PE0DT:SCP1DT:PE1DT */
-} touchscreen = {0};
+} touchscreen = {
+	.x = -1,
+	.y = -1,
+};
 
 #define TOUCH_STATE_PE1DT	0x01
 #define TOUCH_STATE_SCP1DT	0x02
