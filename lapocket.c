@@ -1566,6 +1566,7 @@ static void motherboard_write_word_reg(uint32_t addr, uint16_t val)
 		case 0x0080:
 		case 0x0008:
 		case 0x0002:
+		case 0x008a:
 			return notice("Ignoring unknown motherboard command 0x%.4x (PC: 0x%.8x)\n", val, cpu.PC);
 		default:
 			return panic("Unsupported motherboard command 0x%.4x\n", val);
