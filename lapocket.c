@@ -2590,7 +2590,7 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 		return;
 	case IOPORTS_SCPDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_SCPCR_OFF - PFC_REGS_OFF));
-		if (val & ~0x03)
+		if (val & ~0x0B)
 			return panic("Attempted write to unsupported pin (SC:0x%.2x)\n", val);
 		if ((control & PFC_SCP0_MASK) == PFC_SCP0MD0)
 			write_flag_to_byte(&touchscreen.state, TOUCH_STATE_SCP0DT, val & 0x01);
@@ -2600,6 +2600,8 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 			write_flag_to_byte(&touchscreen.state, TOUCH_STATE_SCP1DT, val & 0x02);
 		else
 			return panic("Unsupported configuration for Port SC (0x%.4x)\n", control);
+		if ((control & PFC_SCP3_MASK) == PFC_SCP3MD0)
+			NOTICE_PIN(SCP3, (val & 0x08) >> 3);
 		ioports.SCPDR = val;
 		return;
 	default:
