@@ -4186,7 +4186,13 @@ static void write_scif_byte_reg(uint32_t addr, uint8_t val)
 		/* TODO: exception or something? Not documented */
 		return;
 	case SCIF_SCFCR2_OFF:
-		/* Not encountered yet, fallthrough */
+		if (val & ~(SCFCR2_RFRST | SCFCR2_TFRST))
+			return panic("Unsupported control command for SCIF FIFO (0x%.4x)\n", val);
+		if (val & SCFCR2_RFRST)
+			scif.SCFRDR2_count = 0;
+		if (val & SCFCR2_TFRST)
+			scif.SCFTDR2_count = 0;
+		return;
 	default:
 		panic("Attempted write to unsupported SCIF register at 0x%.8x\n", addr);
 		return;
