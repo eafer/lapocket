@@ -1,0 +1,16 @@
+# Tests that the hummingbird is drawn to screen correctly
+
+# Patch away all writes to display registers that aren't implemented, otherwise
+# we'll get flooded with unknown register notices.
+patch 0x800370C6 0x0009
+patch 0x800370E2 0x0009
+patch 0x800370EA 0x0009
+patch 0x800370F2 0x0009
+
+set R15 0x0C001000 # Mock a stack somewhere
+set PC 0x80033DE2
+break 0x80033DEC
+run
+
+print CRC
+exit

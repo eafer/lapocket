@@ -763,7 +763,9 @@ uint8_t memory[MEMORY_SIZE] = {0};
  */
 #define DISPLAY_OFF			0x14000000
 #define	DISPLAY_FB_OFF		0x14200000
-#define DISPLAY_FB_SIZE		(240 * 320)
+#define DISPLAY_FB_WIDTH	240
+#define DISPLAY_FB_HEIGHT	320
+#define DISPLAY_FB_SIZE		(DISPLAY_FB_WIDTH * DISPLAY_FB_HEIGHT)
 #define DISPLAY_RAM_SIZE	0x00080000
 struct display {
 	/* Framebuffer and display ram. TODO: what is the ram for? Rename this? */
@@ -963,6 +965,41 @@ struct cpu {
 /* Extra state flags */
 #define EXTRA_IN_DELAYED	1U	/* Executing the instruction after a branch */
 #define EXTRA_POWER_DOWN	2U	/* In power-down mode */
+
+/*
+ * Lots of other display registers get accessed below the display ram. Most of
+ * them will probably never matter to the emulator. These are the few that I've
+ * figured out so far.
+ */
+#define DISPLAY_WIDHT_L_OFF		0x14000016	/* Screen width in words (low byte) */
+#define DISPLAY_WIDHT_H_OFF		0x14000017	/* Screen width in words (high byte) */
+
+static bool is_display_regs_byte_address(uint32_t addr)
+{
+	if ((addr & 0xFF000000) != DISPLAY_OFF)
+		return false;
+	if (addr >= DISPLAY_FB_OFF && addr < DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+		return false;
+	return true;
+}
+
+static uint8_t display_read_byte_reg(uint32_t addr)
+{
+	switch (addr) {
+	case DISPLAY_WIDHT_L_OFF:
+		return (DISPLAY_FB_WIDTH >> 1) & 0x00FF;
+	case DISPLAY_WIDHT_H_OFF:
+		return ((DISPLAY_FB_HEIGHT >> 1) & 0xFF00) >> 8;
+	default:
+		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
+			panic("Unsupported display register 0x%.8x\n", addr);
+			return 0;
+		} else {
+			notice("Reading from unknown display register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
+			return 0;
+		}
+	}
+}
 
 /*
  * The Card Information Structure (CIS) for a CompactFlash memory card is
@@ -4834,14 +4871,8 @@ static uint8_t read_byte(uint32_t addr)
 	case MEMORY_SHADOW:
 		return *(uint8_t *)(memory + (addr & MEMORY_MASK));
 	case DISPLAY_OFF:
-		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
-			panic("Unsupported display register 0x%.8x\n", addr);
-			return 0;
-		}
-		if (addr < DISPLAY_FB_OFF) {
-			notice("Reading from unknown display register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
-			return 0;
-		}
+		if (is_display_regs_byte_address(addr))
+			return display_read_byte_reg(addr);
 		return display.fb[addr - DISPLAY_FB_OFF];
 	case 0x13000000:
 		return xB3A_read_byte_reg(addr);
