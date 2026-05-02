@@ -4371,23 +4371,34 @@ static void tmu_write_word_reg(uint32_t addr, uint16_t val)
 	uint16_t *tcr = NULL;
 	uint16_t preserved_bits;
 
-	if (addr == TMU_TCR0_OFF)
+	if (addr == TMU_TCR0_OFF) {
 		tcr = &tmu.TCR[0];
-	else if (addr == TMU_TCR1_OFF)
+		val &= TCR_0_1_BIT_MASK;
+	} else if (addr == TMU_TCR1_OFF) {
 		tcr = &tmu.TCR[1];
-	else if (addr == TMU_TCR2_OFF)
+		val &= TCR_0_1_BIT_MASK;
+	} else if (addr == TMU_TCR2_OFF) {
 		tcr = &tmu.TCR[2];
+		val &= TCR_2_BIT_MASK;
+	}
 
 	switch (addr) {
 	case TMU_TCR0_OFF:
 	case TMU_TCR1_OFF:
-		val &= TCR_0_1_BIT_MASK;
+	case TMU_TCR2_OFF:
+		if (val & TCR_ICPE) {
+			panic("Unsupported input capture function for TCR (0x%.2x)\n", val);
+			return;
+		}
 		if (val & TCR_CKEG) {
 			panic("Unsupported timer configuration for TCR (0x%.2x)\n", val);
 			return;
 		}
-		if ((val & TCR_TPSC) & 4) {
-			panic("Unsupported TCNT clock input (TCR: 0x%.2x)\n", val);
+		if ((val & TCR_TPSC) >= 6) {
+			panic("Reserved TCNT clock input (TCR: 0x%.2x)\n", val);
+			return;
+		} else if ((val & TCR_TPSC) == 5) {
+			panic("Unsupported TCNT external clock input (TCR: 0x%.2x)\n", val);
 			return;
 		}
 		preserved_bits = val & TCR_UNSETTABLE_MASK;
@@ -7866,6 +7877,7 @@ static int tmu_prescaler(int i)
 	tpsc = tmu.TCR[i] & TCR_TPSC;
 	while (tpsc--)
 		result <<= 2;
+	/* TODO: when prescaler is 4, the RTC should be used... */
 	return result;
 }
 
