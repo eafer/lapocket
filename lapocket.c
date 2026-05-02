@@ -2115,6 +2115,15 @@ uint8_t pfc_regs[PFC_REGS_SIZE] = {0};
 #define PFC_PE6MD0		(1U << (6 * 2 + 0))
 #define PFC_PE6MD1		(1U << (6 * 2 + 1))
 #define PFC_PE6_MASK	(PFC_PE6MD0 | PFC_PE6MD1)
+#define PFC_PF0MD0		0x0001
+#define PFC_PF0MD1		0x0002
+#define PFC_PF0_MASK	(PFC_PF0MD0 | PFC_PF0MD1)
+#define PFC_PF1MD0		0x0004
+#define PFC_PF1MD1		0x0008
+#define PFC_PF1_MASK	(PFC_PF1MD0 | PFC_PF1MD1)
+#define PFC_PF2MD0		0x0010
+#define PFC_PF2MD1		0x0020
+#define PFC_PF2_MASK	(PFC_PF2MD0 | PFC_PF2MD1)
 #define PFC_PF3MD0		0x0040
 #define PFC_PF3MD1		0x0080
 #define PFC_PF3_MASK	(PFC_PF3MD0 | PFC_PF3MD1)
@@ -2365,12 +2374,10 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 		if ((*reg ^ val) & PFC_PF4_MASK) {
 			if ((val & PFC_PF4_MASK) != (PFC_PF4MD0 | PFC_PF4MD1))
 				return panic("Unsupported PF4 configuration 0x%.4x\n", val);
-			notice("Unknown pin PF4 set to input with pullup off\n");
 		}
 		if ((*reg ^ val) & PFC_PF3_MASK) {
 			if ((val & PFC_PF3_MASK) != (PFC_PF3MD0 | PFC_PF3MD1))
 				return panic("Unsupported PF3 configuration 0x%.4x\n", val);
-			notice("Unknown pin PF3 set to input with pullup off\n");
 		}
 		*reg = val;
 		return;
@@ -2776,17 +2783,28 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 		return val;
 	case IOPORTS_PFDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PFCR_OFF - PFC_REGS_OFF));
-		if (control != 0xAAAA) {
-			panic("Unsupported configuration for Port F (0x%.4x)\n", control);
-			return 0;
-		}
-		/* These input pins are for the PINT8-15 interrupts */
-		write_flag_to_byte(&val, 1U << (12 - 8), !(button_state & BUTTON_EXIT_PUSHED));
+		/* Input pins PF0-7 are for the PINT8-15 interrupts */
+		if (control & PFC_PF4MD1)
+			write_flag_to_byte(&val, 1U << 4, !(button_state & BUTTON_EXIT_PUSHED));
+		else
+			write_flag_to_byte(&val, 1U << 4, false);
 		/* Keep these unpushed for now... (TODO) */
-		write_flag_to_byte(&val, 1U << (11 - 8), !(button_state & BUTTON_RECORD_PUSHED));
-		write_flag_to_byte(&val, 1U << (10 - 8), !(button_state & BUTTON_ENTER_PUSHED));
-		write_flag_to_byte(&val, 1U << (9 - 8), !(button_state & BUTTON_DOWN_PUSHED));
-		write_flag_to_byte(&val, 1U << (8 - 8), !(button_state & BUTTON_UP_PUSHED));
+		if (control & PFC_PF3MD1)
+			write_flag_to_byte(&val, 1U << 3, !(button_state & BUTTON_RECORD_PUSHED));
+		else
+			write_flag_to_byte(&val, 1U << 3, false);
+		if (control & PFC_PF2MD1)
+			write_flag_to_byte(&val, 1U << 2, !(button_state & BUTTON_ENTER_PUSHED));
+		else
+			write_flag_to_byte(&val, 1U << 2, false);
+		if (control & PFC_PF1MD1)
+			write_flag_to_byte(&val, 1U << 1, !(button_state & BUTTON_DOWN_PUSHED));
+		else
+			write_flag_to_byte(&val, 1U << 1, false);
+		if (control & PFC_PF0MD1)
+			write_flag_to_byte(&val, 1U << 0, !(button_state & BUTTON_UP_PUSHED));
+		else
+			write_flag_to_byte(&val, 1U << 0, false);
 		return val;
 	case IOPORTS_PGDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PGCR_OFF - PFC_REGS_OFF));
