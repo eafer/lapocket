@@ -3554,6 +3554,11 @@ static bool is_ubc_longword_address(uint32_t addr)
  */
 #define CACHE_CCR_OFF	0xFFFFFFEC
 #define CACHE_CCR2_OFF	0x040000B0
+/* The cache is memory-mapped here. Again, not implemented. */
+#define CACHE_ADDR_MAP_OFF	0xF0000000
+#define CACHE_ADDR_MAP_LEN	0x01000000
+#define CACHE_DATA_MAP_OFF	0xF1000000
+#define CACHE_DATA_MAP_LEN	0x01000000
 
 struct cache {
 	uint32_t CCR;	/* Cache control register */
@@ -3568,6 +3573,11 @@ struct cache {
 
 static bool is_cache_longword_address(uint32_t addr)
 {
+	if (addr >= CACHE_ADDR_MAP_OFF && addr < CACHE_ADDR_MAP_OFF + CACHE_ADDR_MAP_LEN)
+		return true;
+	if (addr >= CACHE_DATA_MAP_OFF && addr < CACHE_DATA_MAP_OFF + CACHE_DATA_MAP_LEN)
+		return true;
+
 	switch (addr) {
 	case CACHE_CCR_OFF:
 	case CACHE_CCR2_OFF:
@@ -3579,6 +3589,20 @@ static bool is_cache_longword_address(uint32_t addr)
 
 static void cache_write_longword_reg(uint32_t addr, uint32_t val)
 {
+	/*
+	 * I don't think I need to implement the cache because software will expect
+	 * cache operations to work the same as if the cache wasn't	there. That
+	 * said, software could use this memory map to intentionally manipulate the
+	 * cache contents to produce a wrong result. I have no idea if that makes
+	 * sense, so if it ever happens I will deal with it then. For now I've only
+	 * seen the firmware use this to invalidate entries, writing zero.
+	 */
+	if (addr >= CACHE_ADDR_MAP_OFF && addr < CACHE_ADDR_MAP_OFF + CACHE_ADDR_MAP_LEN) {
+		if (val != 0)
+			return panic("Attempt to manage the cache contents at 0x%.8x\n", addr);
+		return;
+	}
+
 	switch (addr) {
 	case CACHE_CCR_OFF:
 		if (val & ~CCR_BIT_MASK)
@@ -5378,6 +5402,7 @@ static void write_longword(uint32_t addr, uint32_t val)
 		*(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF)) = val;
 		return;
 	case 0xFF000000:
+	case 0xF0000000:
 	case 0x04000000:
 		if (is_rtc_address(addr)) {
 			panic("Bad width (32) for write to RTC\n");
