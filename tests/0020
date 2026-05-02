@@ -130,5 +130,5 @@ patch 0x80037216 0xe61e
 run
 
 # Check the screen contents
-print CRC
+print --raw CRC
 exit

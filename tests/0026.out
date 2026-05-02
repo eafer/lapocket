@@ -1,18 +1,2 @@
 [SERIAL] Batt=3698mV ICharge=99 % Ac=In Battery=Out Charging=Yes
-Writing 0x00 to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036874)
-Writing 0xff to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036880)
-Writing 0x00 to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x800368aa)
-Writing 0xff to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x800368b6)
-Display CRC: 2b790edd
+Display CRC: f551c254

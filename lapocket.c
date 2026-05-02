@@ -770,6 +770,17 @@ uint8_t memory[MEMORY_SIZE] = {0};
 struct display {
 	/* Framebuffer and display ram. TODO: what is the ram for? Rename this? */
 	uint8_t fb[DISPLAY_RAM_SIZE];
+
+	/* The 256-color palette gets written one byte at a time */
+	uint8_t pal_idx;	/* Palette entry to edit */
+	uint8_t pal_rgb;	/* Color to edit (0-2) */
+	uint32_t pal[256];	/* The palette array */
+
+	/*
+	 * The actual rgba screen contents after applying the palette. Only updated
+	 * when it needs to get printed or displayed.
+	 */
+	uint32_t output[DISPLAY_FB_SIZE];
 } display = {0};
 
 enum i2c_state {
@@ -973,6 +984,8 @@ struct cpu {
  */
 #define DISPLAY_WIDHT_L_OFF		0x14000016	/* Screen width in words (low byte) */
 #define DISPLAY_WIDHT_H_OFF		0x14000017	/* Screen width in words (high byte) */
+#define DISPLAY_PAL_IDX_OFF		0x14000024	/* Index of current palette entry */
+#define DISPLAY_PAL_DATA_OFF	0x14000026	/* Write to current palette entry */
 
 static bool is_display_regs_byte_address(uint32_t addr)
 {
@@ -999,6 +1012,41 @@ static uint8_t display_read_byte_reg(uint32_t addr)
 			return 0;
 		}
 	}
+}
+
+static void display_write_byte_reg(uint32_t addr, uint8_t val)
+{
+	switch (addr) {
+	case DISPLAY_PAL_IDX_OFF:
+		display.pal_idx = val;
+		display.pal_rgb = 0;
+		return;
+	case DISPLAY_PAL_DATA_OFF:
+		if (display.pal_rgb == 0)
+			display.pal[display.pal_idx] = 0xFF000000;	/* The alpha channel */
+		/* We assume little-endian, so red is the least significant byte */
+		display.pal[display.pal_idx] |= (val << (display.pal_rgb << 3));
+		if (++display.pal_rgb == 3) {
+			display.pal_rgb = 0;
+			/* May wrap around here - no idea what happens on hardware */
+			++display.pal_idx;
+		}
+		return;
+	default:
+		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+			return panic("Unsupported display register 0x%.8x\n", addr);
+		else
+			return notice("Writing 0x%.2x to unknown display register 0x%.8x (PC: 0x%.8x)\n", val, addr, cpu.PC);
+	}
+}
+
+/* Updates the RGBA output buffer according to framebuffer and palette */
+static void display_update_output(void)
+{
+	int i;
+
+	for (i = 0; i < DISPLAY_FB_SIZE; ++i)
+		display.output[i] = display.pal[display.fb[i]];
 }
 
 /*
@@ -5111,20 +5159,8 @@ static void write_byte(uint32_t addr, uint8_t val)
 		*(uint8_t *)(memory + (addr & MEMORY_MASK)) = val;
 		return;
 	case DISPLAY_OFF:
-		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
-			panic("Unsupported display register 0x%.8x\n", addr);
-			return;
-		}
-		/*
-		 * I've encountered situations where the framebuffer gets zeroed, and
-		 * before and after there are multiple writes to 0xB4000024 and
-		 * 0xB4000026. Eventually I would like to know what these registers do
-		 * exactly (TODO).
-		 */
-		if (addr < DISPLAY_FB_OFF) {
-			notice("Writing 0x%.2x to unknown display register 0x%.8x (PC: 0x%.8x)\n", val, addr, cpu.PC);
-			return;
-		}
+		if (is_display_regs_byte_address(addr))
+			return display_write_byte_reg(addr, val);
 		display.fb[addr - DISPLAY_FB_OFF] = val;
 		return;
 	case 0x13000000:
@@ -8977,21 +9013,44 @@ static int crc_command_handler(int argc, const char **argv)
 	return CLI_CONTINUE;
 }
 
+/*
+ * Normally, the output file will get the screen contents in raw rgba. To
+ * display them, it's better to first run something like:
+ *
+ *   magick -size 240x320 -depth 8 rgba:<printfile> <result>.png
+ *
+ * With the --raw argument, the print command will ignore the palette (which may
+ * not have been set up) and just dump the framebuffer to the output file.
+ */
 static int print_command_handler(int argc, const char **argv)
 {
 	FILE *file = NULL;
+	uint8_t *output = NULL;
+	size_t outlen;
 	const char *path = NULL;
 	size_t ret;
 
-	if (argc == 2) {
+	if (argc == 3) {
+		if (strcmp(argv[1], "--raw") != 0) {
+			printf("Invalid print command: too many arguments\n");
+			return CLI_CONTINUE;
+		}
+		path = argv[2];
+		output = display.fb;
+		outlen = DISPLAY_FB_SIZE;
+	} else if (argc == 2) {
 		path = argv[1];
+		output = (uint8_t *)display.output;
+		outlen = sizeof(display.output);
 	} else {
 		printf("Invalid print command: target file missing\n");
 		return CLI_CONTINUE;
 	}
 
+	display_update_output();
+
 	if (strcmp(path, "CRC") == 0) {
-		printf("Display CRC: %.8x\n", crc32(display.fb, DISPLAY_FB_SIZE));
+		printf("Display CRC: %.8x\n", crc32(output, outlen));
 		return CLI_CONTINUE;
 	}
 
@@ -9001,8 +9060,8 @@ static int print_command_handler(int argc, const char **argv)
 		return CLI_CONTINUE;
 	}
 
-	ret = fwrite(display.fb, 1, DISPLAY_FB_SIZE, file);
-	if (ret != DISPLAY_FB_SIZE) {
+	ret = fwrite(output, 1, outlen, file);
+	if (ret != outlen) {
 		printf("print: write failed\n");
 		fclose(file);
 		return CLI_CONTINUE;
@@ -9150,7 +9209,7 @@ struct shell_command shell_command_list[] = {
 	{"input", "input [button]", input_command_handler},
 	{"map", "map virtual_address physical_address length", map_command_handler},
 	{"patch", "patch address instruction", patch_command_handler},
-	{"print", "print [output_file]", print_command_handler},
+	{"print", "print [--raw] [output_file]", print_command_handler},
 	{"run", "run", run_command_handler},
 	{"serialin", "serialin input", serialin_command_handler},
 	{"set", "set register_name [+|-]value", set_command_handler},

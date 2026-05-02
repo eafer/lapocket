@@ -38,7 +38,7 @@ step
 input QL1
 step 100000
 # We blinked 4 times, so the blink count will be 65535 - 4
-print CRC
+print --raw CRC
 
 # The so-called "Start button" with interrupt id 0x11 is supposed to stop the
 # blinking, but I don't know what that is. Just push any button and change the
@@ -52,7 +52,7 @@ step
 input QL1
 step 100000
 # The blink count should be the same now, and the blinking stopped
-print CRC
+print --raw CRC
 
 # Confirm that it's indeed not blinking
 step 2000000
@@ -62,7 +62,7 @@ run			# Until the blink is printed
 step
 input QL1
 step 10000	# Let the interrupt handler run
-print CRC
+print --raw CRC
 
 # The wheel can be used to adjust the remaining blink count. Make it wrap
 # around back to 2. TODO: this is ugly, implement loops or something.
@@ -115,7 +115,7 @@ step
 input up
 step 100000
 # 2
-print CRC
+print --raw CRC
 
 # Make the light blink again until it stops on its own
 input enter
@@ -132,7 +132,7 @@ step
 input QL1
 step 100000
 # The blink count should be 0 now, and the blinking stopped
-print CRC
+print --raw CRC
 
 # The On/Off button ends the test
 input onoff
@@ -142,5 +142,5 @@ run
 run
 step
 # "Notification Done"
-print CRC
+print --raw CRC
 exit

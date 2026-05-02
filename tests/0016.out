@@ -73,24 +73,8 @@
 [XB3A] Serial = onmlkjihgfedcba`_^]\[ZYXWVUTSRQPONMLKJIHGFED\xa0\xa5\d\n
 [XB3A] ProdID = cba`_^]\[ZYXWVUTSRQPONMLKJIHGFED\xa0\xa5\d\n
 [XB3A] ChkSum = H'3DB2
-Writing 0x00 to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036874)
-Writing 0xff to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036880)
-Writing 0x00 to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0xf0 to unknown display register 0x14000026 (PC: 0x800368aa)
-Writing 0xff to unknown display register 0x14000024 (PC: 0x80036848)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x8003684c)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x80036850)
-Writing 0x00 to unknown display register 0x14000026 (PC: 0x800368b6)
 [SERIAL] ChkSum = H'3DB2, Serial = onmlkjihgfedcba`_^]\[ZYXWVUTSRQPONMLK
 [SERIAL] JIHGFED\xa0\xa5, ProdID = cba`_^]\[ZYXWVUTSRQPONMLKJIHGFED\xa0\xa5
 [SERIAL] , 7C7D7E7F-7A7B-7879-7776-757473727170, \d\n
 [SERIAL] BOD= [H] 71/70/17477
-Display CRC: 3efc4b9d
+Display CRC: f49606ad

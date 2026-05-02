@@ -13,5 +13,5 @@ run
 # same text as the console. The screen does get more intermediate output, but
 # every new line seems to overwrite the last one so it would be hard to check
 # everything.
-print CRC
+print --raw CRC
 exit

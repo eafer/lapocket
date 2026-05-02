@@ -27,5 +27,5 @@ step
 dump cpu
 
 # The handler should print the exception type ("UnconditionalTrap") to screen
-print CRC
+print --raw CRC
 exit
