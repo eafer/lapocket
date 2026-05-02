@@ -1,0 +1,13 @@
+# Tests the MOVBM instruction
+
+set R4 0x0C001000	# End of the memory area to fill
+set R5 10			# Times to loop
+set R6 0x5D			# Byte to set
+
+set PC 0x800451FE
+break 0x8004520A
+run
+
+# 0x0C000FC4:0x0C001000 should be filled with 0x5D
+xxd 0x0C000FC0 0x50
+exit
