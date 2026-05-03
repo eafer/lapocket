@@ -6001,6 +6001,7 @@ static int execute(uint32_t pc);
 #define INSN_I_TRAPA				0xC300
 #define INSN_I_MOVBLG				0xC400
 #define INSN_I_MOVWLG				0xC500
+#define INSN_I_MOVLLG				0xC600
 #define INSN_D_MOVA					0xC700
 #define INSN_TSTI					0xC800
 #define INSN_AND_I8_R0				0xC900
@@ -7050,6 +7051,11 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 		write_gp_register(0, sign_extend_word(read_word(cpu.GBR + (d << 1))));
 		cpu.PC += 2;
 		return 0;
+	case INSN_I_MOVLLG:
+		d = insn & 0x00FFU;
+		write_gp_register(0, read_longword(cpu.GBR + (d << 2)));
+		cpu.PC += 2;
+		return 0;
 	default:
 		break;
 	}
@@ -7760,6 +7766,10 @@ static void disassemble_d_format(uint32_t pc, uint16_t insn)
 	case INSN_I_MOVWLG:
 		d = insn & 0x00FFU;
 		printf("MOV.W @($%.2x,GBR),R0\n", d);
+		return;
+	case INSN_I_MOVLLG:
+		d = insn & 0x00FFU;
+		printf("MOV.L @($%.2x,GBR),R0\n", d);
 		return;
 	default:
 		printf("d (or i) format instruction 0x%x not implemented\n", insn);
