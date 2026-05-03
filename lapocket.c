@@ -4180,6 +4180,15 @@ static void write_gp_register(int n, uint32_t val)
 		cpu.R[n] = val;
 }
 
+/* Write to register from the bank not in use. Only for registers 0-7. */
+static void write_gp_register_bank(int n, uint32_t val)
+{
+	if (cpu.SR & SR_RB_BIT)
+		cpu.R[n] = val;
+	else
+		cpu.R_BANK1[n] = val;
+}
+
 static uint32_t sign_extend_byte(uint8_t val)
 {
 	return val | (val & 0x80 ? 0xFFFFFF00 : 0);
@@ -5952,6 +5961,14 @@ static int execute(uint32_t pc);
 #define INSN_M_LDCMVBR				0x4027
 #define INSN_M_LDCMSSR				0x4037
 #define INSN_M_LDCMSPC				0x4047
+#define INSN_M_LDCRn_BANK			0x408E
+#define INSN_M_LDCR1_BANK			0x409E
+#define INSN_M_LDCR2_BANK			0x40AE
+#define INSN_M_LDCR3_BANK			0x40BE
+#define INSN_M_LDCR4_BANK			0x40CE
+#define INSN_M_LDCR5_BANK			0x40DE
+#define INSN_M_LDCR6_BANK			0x40EE
+#define INSN_M_LDCR7_BANK			0x40FE
 #define INSN_MOVL_AT_DISP_RM_TO_RN	0x5000
 #define INSN_NM_MOVB_ATRM_RN		0x6000
 #define INSN_NM_MOVW_RN_ATRM		0x6001
@@ -6329,6 +6346,7 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 	uint8_t m = (insn & 0x0F00U) >> 8;
 	uint32_t mval;
 	int32_t target;
+	uint8_t bankreg;
 
 	switch (insn & 0xF0FF) {
 	case INSN_M_BRAF_RM:
@@ -6450,6 +6468,12 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		cpu.PC += 2;
 		return 0;
 	default:
+		if ((insn & 0xF08F) == INSN_M_LDCRn_BANK) {
+			bankreg = (insn & 0x0070U) >> 4;
+			write_gp_register_bank(bankreg, read_gp_register(m));
+			cpu.PC += 2;
+			return 0;
+		}
 		break;
 	}
 
@@ -7405,6 +7429,7 @@ static void disassemble_n_format(uint32_t pc, uint16_t insn)
 static void disassemble_m_format(uint32_t pc, uint16_t insn)
 {
 	uint8_t m = (insn & 0x0F00U) >> 8;
+	uint8_t bankreg;
 
 	switch (insn & 0xF0FF) {
 	case INSN_M_BRAF_RM:
@@ -7456,6 +7481,11 @@ static void disassemble_m_format(uint32_t pc, uint16_t insn)
 		printf("LDC.L @R%u+,SPC\n", m);
 		return;
 	default:
+		if ((insn & 0xF08F) == INSN_M_LDCRn_BANK) {
+			bankreg = (insn & 0x0070U) >> 4;
+			printf("LDC R%u,R%u_BANK\n", m, bankreg);
+			return;
+		}
 		printf("M format instruction 0x%x not implemented\n", insn);
 		return;
 	}

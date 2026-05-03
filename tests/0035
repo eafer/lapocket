@@ -1,0 +1,23 @@
+# Tests the LDCRn_BANK instructions
+
+# The cpu is on bank 1. Write 0x12345678 to R4 of bank 0.
+set l:0x8C009894 0x12345678
+set PC 0x80042970
+break 0x80042972
+run
+step
+
+# Switch to bank 0
+set PC 0x8002F704
+step 2
+
+# The cpu is on bank 0. Write 0x87654321 to R4 of bank 1.
+set l:0x8C009894 0x87654321
+set PC 0x80042970
+break 0x80042972
+run
+step
+
+# Check R4 in each of the banks
+dump cpu
+exit
