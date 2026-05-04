@@ -8,7 +8,7 @@ set l:0x8C009C20 0xb2000000	# This global points to the motherboard registers
 set PC 0x8003F044
 break 0x8003F108
 run
-step
+step 2
 
 # The hardware interrupt handler at <0x8003EBC8> uses a static variable to
 # discard 99 out of every 100 interrupts. No idea what this is about, but for

@@ -17,7 +17,7 @@ set l:0x0C01000C 0x403e0000
 set l:0x0C010010 0x00000000
 set l:0x0C010014 0x403e0000
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 # 1.0 / 0.0 = Infinity
@@ -30,7 +30,7 @@ set l:0x0C01000C 0x3ff00000
 set l:0x0C010010 0x00000000
 set l:0x0C010014 0x00000000
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 # 0.0 / 0.0 = NaN
@@ -43,7 +43,7 @@ set l:0x0C01000C 0x00000000
 set l:0x0C010010 0x00000000
 set l:0x0C010014 0x00000000
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 # 1.0 / -Infinity = -0.0
@@ -56,7 +56,7 @@ set l:0x0C01000C 0x3ff00000
 set l:0x0C010010 0x00000000
 set l:0x0C010014 0xfff00000
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 # NaN / NaN = NaN
@@ -69,7 +69,7 @@ set l:0x0C01000C 0x7fff0000
 set l:0x0C010010 0x000000ff
 set l:0x0C010014 0xfff00000
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 # Infinity / Infinity = NaN
@@ -82,7 +82,7 @@ set l:0x0C01000C 0x7ff00000
 set l:0x0C010010 0x00000000
 set l:0x0C010014 0x7ff00000
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 # 83492.785 / -947343.64 ~= -0.08813
@@ -95,7 +95,7 @@ set l:0x0C01000C 0x40f4624c
 set l:0x0C010010 0x47ae147b
 set l:0x0C010014 0xc12ce91f
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 # 1.11 / DBL_MAX ~= 6.174e-309 (a subnormal number)
@@ -108,7 +108,7 @@ set l:0x0C01000C 0x3ff1c28f
 set l:0x0C010010 0xffffffff
 set l:0x0C010014 0x7fefffff
 run
-step
+step 2
 xxd 0x0C010000 0x18
 
 exit

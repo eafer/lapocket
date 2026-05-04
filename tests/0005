@@ -14,14 +14,14 @@ break 0x800ad34e
 set R4 0x8000826b
 set PC 0x800ad344
 run
-step
+step 2
 dump cpu # R0 should have the integer value: 0x9211
 
 # Test a negative number to cover the NEG instruction
 set R4 0x80012b65
 set PC 0x800ad344
 run
-step
+step 2
 dump cpu # R0 should have the integer value: 0xfffed1a9
 
 exit

@@ -5,7 +5,7 @@ set R15 0x0C001000 # Mock a stack somewhere
 set PC 0x80035580
 break 0x80035670
 run
-step
+step 2
 dump cpu # R0 should be 1, meaning "success"
 
 exit

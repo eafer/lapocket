@@ -12,7 +12,7 @@ set R5 0x8002ad44
 set PC 0x800b3088
 break 0x800b30ce
 run
-step
+step 2
 dump cpu # R0 should have the pointer to the substring: 0x8000048b
 
 exit

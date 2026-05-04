@@ -33,5 +33,5 @@ crc card 524287
 # Now keep going until the end
 break 0x8003DBD8
 run
-step
+step 2
 exit

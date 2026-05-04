@@ -957,6 +957,7 @@ struct cpu {
 	uint32_t INTEVT2;		/* Interrupt event register 2 */
 
 	uint32_t extra_state;	/* Extra state needed for the emulation */
+	uint32_t delayed_pc;	/* For a delayed branch instruction, its address */
 } cpu = {0};
 
 /* Fields of the status register */
@@ -6011,24 +6012,16 @@ static int execute(uint32_t pc);
 #define INSN_MOV_I8_RN				0xE000
 
 /* sh-3 has delayed branch instructions */
-/* TODO: make the target an argument too, to avoid documenting that in all the callers */
-static int execute_delayed_slot(uint32_t pc)
+static void prepare_delayed_slot(uint32_t target)
 {
-	uint32_t target_pc = cpu.PC;
-	int ret;
-
-	if (cpu.extra_state & EXTRA_IN_DELAYED) {
-		panic("Branch after delayed branch!\n");
-		return 1;
-	}
+	if (cpu.extra_state & EXTRA_IN_DELAYED)
+		return panic("Branch after delayed branch!\n");
 
 	cpu.extra_state |= EXTRA_IN_DELAYED;
-	ret = execute(pc + 2);
-	cpu.extra_state &= ~EXTRA_IN_DELAYED;
+	cpu.delayed_pc = cpu.PC + 2;
 
-	/* We increased the pc on execution, but the target remains the same */
-	cpu.PC = target_pc;
-	return ret;
+	/* Delayed slots use the target for any pc relative addressing */
+	cpu.PC = target;
 }
 
 /* Instructions of the form 0000 xxxx xxxx xxxx */
@@ -6046,17 +6039,17 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
 			panic("Invalid delay slot! (TODO)\n");
 		backtrace_pop();
-		cpu.PC = cpu.PR + 4;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(cpu.PR + 4);
+		return 0;
 	case INSN_0_RTE:
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
 			panic("Invalid delay slot! (TODO)\n");
 		if (!(cpu.SR & SR_MD_BIT))
 			panic("Privilege violation! (TODO)\n");
 		backtrace_pop();
-		cpu.PC = cpu.SPC;
 		cpu.SR = cpu.SSR;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(cpu.SPC);
+		return 0;
 	case INSN_0_DIV0U:
 		cpu.SR &= ~(SR_T_BIT | SR_Q_BIT | SR_M_BIT);
 		cpu.PC += 2;
@@ -6353,16 +6346,14 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 	case INSN_M_BRAF_RM:
 		/* The manual seems to be missing the "+4" here */
 		target = cpu.PC + read_gp_register(m) + 4;
-		/* Delayed slots use the target for any pc relative addressing */
-		cpu.PC = target;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(target);
+		return 0;
 	case INSN_M_JSR_AT_RM:
 		target = read_gp_register(m) + 4;
 		backtrace_push(cpu.PC, target, false /* interrupt */);
 		cpu.PR = cpu.PC;
-		/* Delayed slots use the target for any pc relative addressing */
-		cpu.PC = target;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(target);
+		return 0;
 	case INSN_M_LDS_RM_MACH:
 		cpu.MACH = read_gp_register(m);
 		/* Sign extension, I guess. It's copied from the reference */
@@ -6440,9 +6431,8 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_M_JMP:
 		target = read_gp_register(m) + 4;
-		/* Delayed slots use the target for any pc relative addressing */
-		cpu.PC = target;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(target);
+		return 0;
 	case INSN_M_LDCMVBR:
 		if (!(cpu.SR & SR_MD_BIT))
 			panic("Privilege violation! (TODO)\n");
@@ -6915,9 +6905,8 @@ static int execute_d12_format(uint32_t pc, uint16_t insn)
 	switch (insn & 0xF000) {
 	case INSN_BRA:
 		target = cpu.PC + (d << 1) + 4;
-		/* Delayed slots use the target for any pc relative addressing */
-		cpu.PC = target;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(target);
+		return 0;
 	default:
 		break;
 	}
@@ -6966,8 +6955,8 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 			return 0;
 		}
 		target = cpu.PC + (d << 1) + 4;
-		cpu.PC = target;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(target);
+		return 0;
 	case INSN_D_BFS:
 		d = sign_extend_lower_8(insn);
 		if (cpu.SR & SR_T_BIT) {
@@ -6975,8 +6964,8 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 			return 0;
 		}
 		target = cpu.PC + (d << 1) + 4;
-		cpu.PC = target;
-		return execute_delayed_slot(pc);
+		prepare_delayed_slot(target);
+		return 0;
 	case INSN_MOVB_R0_TO_AT_DISP_GBR:
 		d = insn & 0x00FFU;
 		write_byte(cpu.GBR + d, read_gp_register(0));
@@ -8097,7 +8086,6 @@ static void update_top_light(void)
 	}
 }
 
-/* TODO: how to handle delayed slots? */
 static bool pc_is_breakpoint(uint32_t pc)
 {
 	int i;
@@ -8200,6 +8188,10 @@ static int pint_priority(int i)
 
 static void interrupt_check(void)
 {
+	/* Interrupts only get accepted after the delay slot */
+	if (cpu.extra_state & EXTRA_IN_DELAYED)
+		return;
+
 	/*
 	 * "Interrupts are accepted during sleep mode even when the BL bit in the
 	 * SR register is 1."
@@ -8239,6 +8231,8 @@ static void interrupt_check(void)
 static int run(int steps)
 {
 	bool forever = steps < 0;
+	bool delayed_slot;
+	uint32_t pc, old_pc;
 	int ret;
 
 	while (true) {
@@ -8254,12 +8248,21 @@ static int run(int steps)
 
 		/* TODO: actually sleep instead of looping around interrupt checks */
 		if (!(cpu.extra_state & EXTRA_POWER_DOWN)) {
-			if (pc_is_breakpoint(cpu.PC))
+			delayed_slot = cpu.extra_state & EXTRA_IN_DELAYED;
+			pc = delayed_slot ? cpu.delayed_pc : cpu.PC;
+			old_pc = cpu.PC;
+			if (pc_is_breakpoint(pc))
 				return 0;
-			ret = execute(cpu.PC);
+			ret = execute(pc);
 			if (ret) {
 				become_interactive();
 				return ret;
+			}
+			if (delayed_slot) {
+				cpu.extra_state &= ~EXTRA_IN_DELAYED;
+				cpu.delayed_pc = 0;
+				/* PC got increased, but the target remains the same */
+				cpu.PC = old_pc;
 			}
 			update_clocks();
 			update_scif();
@@ -8396,10 +8399,15 @@ static int dump_command_handler(int argc, const char **argv)
 
 static int disas_command_handler(int argc, const char **argv)
 {
-	uint32_t true_pc = cpu.PC - 4;
+	uint32_t true_pc;
 	uint32_t length = 0x20;
 	char *endptr = NULL;
 	unsigned long tmp;
+
+	if (cpu.extra_state & EXTRA_IN_DELAYED)
+		true_pc = cpu.delayed_pc - 4;
+	else
+		true_pc = cpu.PC - 4;
 
 	if (argc > 3) {
 		printf("Invalid disassemble command\n");

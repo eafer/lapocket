@@ -12,7 +12,7 @@ set R15 0x0C001000			# Mock a stack somewhere
 set PC 0x8003F044
 break 0x8003F108
 run
-step
+step 2
 
 # The hardware interrupt handler at <0x8003EBC8> uses a static variable to
 # discard 99 out of every 100 interrupts. No idea what this is about, but for

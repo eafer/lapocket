@@ -4,7 +4,7 @@ set R5 0x8000045c
 set PC 0x800B2D90
 break 0x800B2DEC
 run
-step
+step 2
 dump cpu # R0 should have a pointer to the copied string: 0x0C000000
 xxd 0x0C000000 0x30 # This should have the actual output
 exit

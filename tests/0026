@@ -9,7 +9,7 @@ set PC 0x80039360
 break 0x80039696
 serialin \x08 # Backspace ends the test for some reason
 run
-step
+step 2
 
 print CRC
 exit

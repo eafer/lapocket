@@ -9,25 +9,25 @@ break 0x800b2fd6
 set R4 0x8000045c
 set PC 0x800B2F84
 run
-step
+step 2
 dump cpu # R0 should have the lenght: 0x26
 
 set R4 0x8000045d
 set PC 0x800B2F84
 run
-step
+step 2
 dump cpu # R0 should have the lenght: 0x25
 
 set R4 0x8000045e
 set PC 0x800B2F84
 run
-step
+step 2
 dump cpu # R0 should have the lenght: 0x24
 
 set R4 0x8000045f
 set PC 0x800B2F84
 run
-step
+step 2
 dump cpu # R0 should have the lenght: 0x23
 
 exit

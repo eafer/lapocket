@@ -2,6 +2,6 @@
 set R5 0x45
 set R4 0x8000041d
 set PC 0x800B2E2C
-step 66
+step 75
 dump cpu
 exit

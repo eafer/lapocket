@@ -5,7 +5,7 @@ set l:0x8C009894 0x12345678
 set PC 0x80042970
 break 0x80042972
 run
-step
+step 2
 
 # Switch to bank 0
 set PC 0x8002F704
@@ -16,7 +16,7 @@ set l:0x8C009894 0x87654321
 set PC 0x80042970
 break 0x80042972
 run
-step
+step 2
 
 # Check R4 in each of the banks
 dump cpu

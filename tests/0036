@@ -1,0 +1,52 @@
+# Tests that breakpoints and interrupts behave correctly around delayed slots
+
+set R15 0x0C001000 # Mock a stack somewhere
+
+# This function sets the VBR and the default exception handlers.
+set PC 0x8003F044
+break 0x8003F108
+# Break in the delay slot for a BRA instruction and check that it doesn't run
+# until we step again.
+break 0x8003F094
+run
+disas +0 1
+dump cpu
+step
+disas +0 1
+dump cpu
+# Complete the setup, and check that we can step into the RTS slot
+run
+disas +0 1
+step
+disas +0 1
+step
+disas +0 1
+
+# Repurpose the button self-tests from 0020
+set PC 0x800396E4
+set R4 0
+set l:0x8C009E84 1
+
+# Break in the delay slot for BF/S instruction at 0x80037060 and push a button,
+# but first fake the R1 register so that the branch gets taken.
+break 0x8003705E
+run
+set R1 1
+break 0x80037062
+run
+# Check that we are indeed at the delay slot and the instruction is not yet run
+disas +0 1
+dump cpu
+# Push the button, and check that nothing changes yet
+input QL1
+disas +0 1
+dump cpu
+# Step, and confirm that the interrupt was not accepted in the delay slot
+step
+disas +0 1
+dump cpu
+# Step again, and confirm that the interrupt finally got accepted
+step
+disas +0 1
+
+exit

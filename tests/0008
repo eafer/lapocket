@@ -10,7 +10,7 @@ set R5 0x8002c420
 set PC 0x800A4BCC
 break 0x800a4be2
 run
-step
+step 2
 dump cpu # R0 should have a pointer to the copied string: 0x0C000000
 xxd 0x0C000000 0x90 # This should have the actual output
 

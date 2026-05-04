@@ -3,6 +3,6 @@ set R4 0x58
 set PC 0x800B40F4
 break 0x800b4104
 run
-step
+step 2
 dump cpu # R0 should have 0x78 ('x')
 exit

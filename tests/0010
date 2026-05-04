@@ -5,6 +5,6 @@ set R4 0x0000041c
 set PC 0x80031d70
 break 0x80031d7c
 run
-step
+step 2
 dump cpu # R0 should have the length: 0x21 (one extra for the carriage return)
 exit

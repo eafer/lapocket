@@ -23,7 +23,7 @@ run
 dump cpu
 
 # Finally test the RTE instruction
-step
+step 2
 dump cpu
 
 # The handler should print the exception type ("UnconditionalTrap") to screen
