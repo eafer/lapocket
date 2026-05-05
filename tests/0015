@@ -2,6 +2,8 @@
 # about hardware, but I'm guessing that writes such as these would not be
 # possible on a physical eeprom. It doesn't matter right now, though.
 
+monitor eeprom on
+
 set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
 set R15 0x0C001000			# Mock a stack somewhere
 

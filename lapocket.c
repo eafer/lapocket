@@ -12,6 +12,12 @@ static void eeprom_monitor_dump_all(void);
 struct console_monitor;
 static void console_monitor_dump(struct console_monitor *mon);
 static void dump_all_monitors(void);
+#define MONITOR_EEPROM_ENABLED	(1U << 0)
+#define MONITOR_NOTICE_ENABLED	(1U << 1)
+#define MONITOR_SERIAL_ENABLED	(1U << 2)
+#define MONITOR_XB3A_ENABLED	(1U << 3)
+/* The eeprom i2c monitor is not very interesting so it's off by default */
+static uint8_t enabled_monitors = MONITOR_NOTICE_ENABLED | MONITOR_SERIAL_ENABLED | MONITOR_XB3A_ENABLED;
 
 static void dump_cpu(void);
 static void print_backtrace(void);
@@ -48,6 +54,9 @@ __attribute__((format(printf, 1, 2)))
 void notice(const char *format, ...)
 {
 	va_list args;
+
+	if (!(enabled_monitors & MONITOR_NOTICE_ENABLED))
+		return;
 
 	dump_all_monitors();
 	va_start(args, format);
@@ -1786,6 +1795,9 @@ static void eeprom_monitor_save_str(const char *str)
 	char *buf = NULL;
 	int len, left, ret;
 
+	if (!(enabled_monitors & MONITOR_EEPROM_ENABLED))
+		return;
+
 	dump_monitors_except(MONITOR_EEPROM);
 
 	len = eeprom.mon_len;
@@ -2917,10 +2929,15 @@ static void console_monitor_save_bytes(struct console_monitor *mon, const char *
 	int outlen, left, ret;
 
 	/* TODO: be more clever here */
-	if (mon == &xB3A_monitor)
+	if (mon == &xB3A_monitor) {
+		if (!(enabled_monitors & MONITOR_XB3A_ENABLED))
+			return;
 		dump_monitors_except(MONITOR_XB3A);
-	else
+	} else {
+		if (!(enabled_monitors & MONITOR_SERIAL_ENABLED))
+			return;
 		dump_monitors_except(MONITOR_SERIAL);
+	}
 
 	outlen = mon->cm_len;
 	buf = mon->cm_buf + outlen;
@@ -9309,6 +9326,40 @@ static int serialin_command_handler(int argc, const char **argv)
 	return CLI_CONTINUE;
 }
 
+/* Selectively enable/disable debug output */
+static int monitor_command_handler(int argc, const char **argv)
+{
+	bool on;
+
+	if (argc != 3) {
+		printf("Invalid monitor command\n");
+		return CLI_CONTINUE;
+	}
+
+	if (strcmp(argv[2], "on") == 0) {
+		on = true;
+	} else if (strcmp(argv[2], "off") == 0) {
+		on = false;
+	} else {
+		printf("Invalid monitor state \"%s\" (must be on/off)\n", argv[2]);
+		return CLI_CONTINUE;
+	}
+
+	if (strcmp(argv[1], "eeprom") == 0) {
+		write_flag_to_byte(&enabled_monitors, MONITOR_EEPROM_ENABLED, on);
+	} else if (strcmp(argv[1], "notice") == 0) {
+		write_flag_to_byte(&enabled_monitors, MONITOR_NOTICE_ENABLED, on);
+	} else if (strcmp(argv[1], "serial") == 0) {
+		write_flag_to_byte(&enabled_monitors, MONITOR_SERIAL_ENABLED, on);
+	} else if (strcmp(argv[1], "xb3a") == 0) {
+		write_flag_to_byte(&enabled_monitors, MONITOR_XB3A_ENABLED, on);
+	} else {
+		printf("No monitor called \"%s\"\n", argv[1]);
+		return CLI_CONTINUE;
+	}
+	return CLI_CONTINUE;
+}
+
 static int help_command_handler(int argc, const char **argv);
 
 struct shell_command shell_command_list[] = {
@@ -9321,6 +9372,7 @@ struct shell_command shell_command_list[] = {
 	{"help", "help [command]", help_command_handler},
 	{"input", "input [button]", input_command_handler},
 	{"map", "map virtual_address physical_address length", map_command_handler},
+	{"monitor", "monitor [eeprom|notice|serial|xb3a] [on|off]", monitor_command_handler},
 	{"patch", "patch address instruction", patch_command_handler},
 	{"print", "print [--raw] [output_file]", print_command_handler},
 	{"run", "run", run_command_handler},
