@@ -69,14 +69,14 @@ void notice(const char *format, ...)
  * called during disassembly, memory inspection, etc.
  */
 #ifdef __GNUC__
-__attribute__((format(printf, 1, 2)))
+[[gnu::format(printf, 1, 2)]]
 #endif
-void panic(const char *format, ...)
+[[nodiscard]] int panic(const char *format, ...)
 {
 	va_list args;
 
 	if (panicked)
-		return;
+		return 1;
 
 	dump_all_monitors();
 
@@ -96,6 +96,7 @@ void panic(const char *format, ...)
 	puts("");
 
 	panicked = true;
+	return 1;
 }
 
 /*
@@ -274,7 +275,7 @@ static bool is_adconv_byte_address(uint32_t addr)
 	}
 }
 
-static void adconv_write_byte_reg(uint32_t addr, uint8_t val)
+static int adconv_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	uint8_t preserved_bits;
 
@@ -297,15 +298,14 @@ static void adconv_write_byte_reg(uint32_t addr, uint8_t val)
 			notice("A/D conversion time set to %u states\n", val & ADCSR_CKS ? 134 : 266);
 		}
 		adconv.ADCSR = val;
-		return;
+		return 0;
 	case ADCONV_ADCR_OFF:
 		if (val)
 			return panic("Unsupported ADCR configuration 0x%.4x\n", val);
 		adconv.ADCR = val;
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported A/D converter register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported A/D converter register at 0x%.8x\n", addr);
 	}
 }
 
@@ -318,117 +318,115 @@ static int charge_ch5_to_ch4(int ch5)
 	return ch5 * 33;
 }
 
-static uint8_t adconv_read_byte_reg(uint32_t addr)
+static int adconv_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	unsigned int channel;
 
 	switch (addr) {
 	case ADCONV_ADCSR_OFF:
-		return adconv.ADCSR;
+		*val_p = adconv.ADCSR;
+		return 0;
 	/*
 	 * The result of an A/D conversion is a 10-bit number. 'H' registers hold
 	 * the top 8 bits; 'L' registers hold the bottom 2, in the top 2 positions.
 	 */
 	case ADCONV_ADDRAH_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
+		channel = adconv.ADCSR & ADCSR_CH_MASK;
+		if (channel == 4) {
+			*val_p = charge_ch5_to_ch4(battery.charge) >> 2;
 			return 0;
 		}
-		channel = adconv.ADCSR & ADCSR_CH_MASK;
-		if (channel == 4)
-			return charge_ch5_to_ch4(battery.charge) >> 2;
-		panic("A/D ADDRA read attempt for wrong channel (%u)\n", channel);
-		return 0;
+		return panic("A/D ADDRA read attempt for wrong channel (%u)\n", channel);
 	case ADCONV_ADDRAL_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
-			return 0;
-		}
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
 		channel = adconv.ADCSR & ADCSR_CH_MASK;
-		if (channel == 4)
-			return charge_ch5_to_ch4(battery.charge) << 6;
-		panic("A/D ADDRA read attempt for wrong channel (%u)\n", channel);
-		return 0;
-	case ADCONV_ADDRBH_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
+		if (channel == 4) {
+			*val_p = charge_ch5_to_ch4(battery.charge) << 6;
 			return 0;
 		}
+		return panic("A/D ADDRA read attempt for wrong channel (%u)\n", channel);
+	case ADCONV_ADDRBH_OFF:
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
 		channel = adconv.ADCSR & ADCSR_CH_MASK;
 		if (channel == 1) {
 			/* This is probably not accurate but it shouldn't matter... */
-			if (touchscreen.y < 0 || touchscreen.state != TOUCH_STATE_READ_Y)
+			if (touchscreen.y < 0 || touchscreen.state != TOUCH_STATE_READ_Y) {
+				*val_p = 0;
 				return 0;
-			return touchscreen.y >> 2;
-		}
-		if (channel == 5)
-			return battery.charge >> 2;
-		panic("A/D ADDRB read attempt for wrong channel (%u)\n", channel);
-		return 0;
-	case ADCONV_ADDRBL_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
+			}
+			*val_p = touchscreen.y >> 2;
 			return 0;
 		}
+		if (channel == 5) {
+			*val_p = battery.charge >> 2;
+			return 0;
+		}
+		return panic("A/D ADDRB read attempt for wrong channel (%u)\n", channel);
+	case ADCONV_ADDRBL_OFF:
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
 		channel = adconv.ADCSR & ADCSR_CH_MASK;
 		if (channel == 1) {
-			if (touchscreen.y < 0 || touchscreen.state != TOUCH_STATE_READ_Y)
+			if (touchscreen.y < 0 || touchscreen.state != TOUCH_STATE_READ_Y) {
+				*val_p = 0;
 				return 0;
-			return touchscreen.y << 6;
+			}
+			*val_p = touchscreen.y << 6;
+			return 0;
 		}
-		if (channel == 5)
-			return battery.charge << 6;
-		panic("A/D data read attempt for wrong channel (%u != 1)\n", channel);
-		return 0;
+		if (channel == 5) {
+			*val_p = battery.charge << 6;
+			return 0;
+		}
+		return panic("A/D data read attempt for wrong channel (%u != 1)\n", channel);
 	case ADCONV_ADDRCH_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
-			return 0;
-		}
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
 		channel = adconv.ADCSR & ADCSR_CH_MASK;
-		if (channel != 2) {
-			panic("A/D data read attempt for wrong channel (%u != 2)\n", channel);
+		if (channel != 2)
+			return panic("A/D data read attempt for wrong channel (%u != 2)\n", channel);
+		if (touchscreen.x < 0 || touchscreen.state != TOUCH_STATE_READ_X) {
+			*val_p = 0;
 			return 0;
 		}
-		if (touchscreen.x < 0 || touchscreen.state != TOUCH_STATE_READ_X)
-			return 0;
-		return touchscreen.x >> 2;
+		*val_p = touchscreen.x >> 2;
+		return 0;
 	case ADCONV_ADDRCL_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
-			return 0;
-		}
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
 		channel = adconv.ADCSR & ADCSR_CH_MASK;
-		if (channel != 2) {
-			panic("A/D data read attempt for wrong channel (%u != 2)\n", channel);
+		if (channel != 2)
+			return panic("A/D data read attempt for wrong channel (%u != 2)\n", channel);
+		if (touchscreen.x < 0 || touchscreen.state != TOUCH_STATE_READ_X) {
+			*val_p = 0;
 			return 0;
 		}
-		if (touchscreen.x < 0 || touchscreen.state != TOUCH_STATE_READ_X)
-			return 0;
-		return touchscreen.x << 6;
+		*val_p = touchscreen.x << 6;
+		return 0;
 	case ADCONV_ADDRDH_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
+		channel = adconv.ADCSR & ADCSR_CH_MASK;
+		if (channel == 3) {
+			*val_p = battery.voltage >> 2;
 			return 0;
 		}
-		channel = adconv.ADCSR & ADCSR_CH_MASK;
-		if (channel == 3)
-			return battery.voltage >> 2;
-		panic("A/D ADDRD read attempt for wrong channel (%u)\n", channel);
-		return 0;
+		return panic("A/D ADDRD read attempt for wrong channel (%u)\n", channel);
 	case ADCONV_ADDRDL_OFF:
-		if (!(adconv.ADCSR & ADCSR_ADST)) {
-			panic("A/D data read attempt outside of conversion\n");
+		if (!(adconv.ADCSR & ADCSR_ADST))
+			return panic("A/D data read attempt outside of conversion\n");
+		channel = adconv.ADCSR & ADCSR_CH_MASK;
+		if (channel == 3) {
+			*val_p = battery.voltage << 6;
 			return 0;
 		}
-		channel = adconv.ADCSR & ADCSR_CH_MASK;
-		if (channel == 3)
-			return battery.voltage << 6;
-		panic("A/D ADDRD read attempt for wrong channel (%u)\n", channel);
-		return 0;
+		return panic("A/D ADDRD read attempt for wrong channel (%u)\n", channel);
 	default:
-		panic("Attempted read of unsupported A/D converter register at 0x%.8x\n", addr);
-		return 0;
+		return panic("Attempted read of unsupported A/D converter register at 0x%.8x\n", addr);
 	}
 }
 
@@ -463,7 +461,7 @@ static bool is_daconv_byte_address(uint32_t addr)
 	}
 }
 
-static void daconv_write_byte_reg(uint32_t addr, uint8_t val)
+static int daconv_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	/*
 	 * Contrast and brightness are set as a voltage between 0 and 256 on analog
@@ -480,32 +478,34 @@ static void daconv_write_byte_reg(uint32_t addr, uint8_t val)
 		daconv.DADR0 = val;
 		if (daconv.DACR & DACR_DAE || daconv.DACR & DACR_DAOE0)
 			notice("Contrast set to %u%%\n", daconv.DADR0 * 100 >> 8);
-		return;
+		return 0;
 	case DACONV_DADR1_OFF:
 		daconv.DADR1 = val;
 		if (daconv.DACR & DACR_DAE || daconv.DACR & DACR_DAOE1)
 			notice("Brightness set to %u%%\n", daconv.DADR1 * 100 >> 8);
-		return;
+		return 0;
 	case DACONV_DACR_OFF:
 		daconv.DACR = val | DACR_RSVD;
-		return;
+		return 0;
 	default:
 		return panic("BUG: nonexistent register for the D/A converter\n");
 	}
 }
 
-static uint8_t daconv_read_byte_reg(uint32_t addr)
+static int daconv_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case DACONV_DADR0_OFF:
-		return daconv.DADR0;
-	case DACONV_DADR1_OFF:
-		return daconv.DADR1;
-	case DACONV_DACR_OFF:
-		return daconv.DACR;
-	default:
-		panic("BUG: nonexistent register for the D/A converter\n");
+		*val_p = daconv.DADR0;
 		return 0;
+	case DACONV_DADR1_OFF:
+		*val_p = daconv.DADR1;
+		return 0;
+	case DACONV_DACR_OFF:
+		*val_p = daconv.DACR;
+		return 0;
+	default:
+		return panic("BUG: nonexistent register for the D/A converter\n");
 	}
 }
 
@@ -610,7 +610,7 @@ static bool is_usb_byte_address(uint32_t addr)
 	}
 }
 
-static void usb_execute_command(void)
+static int usb_execute_command(void)
 {
 	uint8_t byte;
 
@@ -618,20 +618,21 @@ static void usb_execute_command(void)
 	case USB_SET_DMA:
 		byte = usb.buf[0];
 		if (byte)
-			panic("USB DMA operation not supported\n");
+			return panic("USB DMA operation not supported\n");
 		break;
 	case USB_SET_END_ENABLE:
 		byte = usb.buf[0];
 		if (byte)
-			panic("USB generic/isochronous endpoints not supported\n");
+			return panic("USB generic/isochronous endpoints not supported\n");
 		break;
 	default:
-		panic("BUG: executing unsupported usb command 0x%.2x\n", usb.command);
+		return panic("BUG: executing unsupported usb command 0x%.2x\n", usb.command);
 	}
 
 	usb.buf_off = 0;
 	usb.buf_end = 0;
 	usb.command = USB_NO_COMMAND;
+	return 0;
 }
 
 static uint8_t usb_command_to_trans_len(uint8_t command)
@@ -649,12 +650,12 @@ static uint8_t usb_command_to_trans_len(uint8_t command)
 	case USB_READ_INTR:
 		return 2;
 	default:
-		panic("BUG: accepting unsupported usb command 0x%.2x\n", usb.command);
+		(void)panic("BUG: accepting unsupported usb command 0x%.2x\n", usb.command);
 		return 0;
 	}
 }
 
-static void usb_write_byte_reg(uint32_t addr, uint8_t val)
+static int usb_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
 	case USB_COMMANDS_OFF:
@@ -675,37 +676,35 @@ static void usb_write_byte_reg(uint32_t addr, uint8_t val)
 		default:
 			return panic("Unsupported usb command 0x%.2x\n", val);
 		}
-		return;
+		return 0;
 	case USB_DATA_OFF:
 		if (usb.buf_off == usb.buf_end)
 			return panic("Input too long for usb command 0x%.2x\n", usb.command);
 		usb.buf[usb.buf_off++] = val;
 		if (usb.buf_off == usb.buf_end)
 			return usb_execute_command();
-		return;
+		return 0;
 	default:
 		return panic("Attempted write of 0x%.2x to unsupported usb register at 0x%.8x\n", val, addr);
 	}
 }
 
-static uint8_t usb_read_byte_reg(uint32_t addr)
+static int usb_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case USB_DATA_OFF:
-		if (usb.buf_off++ == usb.buf_end) {
-			panic("Too many reads for usb command 0x%.2x\n", usb.command);
-			return 0;
-		}
+		if (usb.buf_off++ == usb.buf_end)
+			return panic("Too many reads for usb command 0x%.2x\n", usb.command);
 		/*
 		 * Early on boot, the firmware runs status reads on all endpoints and
 		 * reads the interrupt register. The values aren't checked, so I think
 		 * the point is to clear interrupts. I don't even keep track of the usb
 		 * interrupt register, so for now do nothing and just return zero.
 		 */
+		*val_p = 0;
 		return 0;
 	default:
-		panic("Attempted read from unsupported usb register at 0x%.8x\n", addr);
-		return 0;
+		return panic("Attempted read from unsupported usb register at 0x%.8x\n", addr);
 	}
 }
 
@@ -814,9 +813,9 @@ struct i2c {
 } i2c = {0};
 
 static void eeprom_stop(void);
-static void eeprom_start(void);
-static uint8_t eeprom_receive_frame(void);
-static void eeprom_deliver_frame(uint8_t frame);
+static int eeprom_start(void);
+static int eeprom_receive_frame(uint8_t *frame_p);
+static int eeprom_deliver_frame(uint8_t frame);
 
 static void i2c_release_sda(void)
 {
@@ -844,10 +843,10 @@ static void i2c_pull_down_sda(void)
 	i2c.sda = 0;
 }
 
-static void i2c_pull_up_scl(void)
+static int i2c_pull_up_scl(void)
 {
 	if (i2c.scl == 1)
-		return;
+		return 0;
 
 	/*
 	 * We update the incoming sda values when the clock goes high, though in
@@ -867,18 +866,20 @@ static void i2c_pull_up_scl(void)
 	default:
 	}
 	i2c.scl = 1;
+	return 0;
 }
 
-static void i2c_pull_down_scl(void)
+static int i2c_pull_down_scl(void)
 {
 	bool readwrite;
 
 	if (i2c.scl == 0)
-		return;
+		return 0;
 
 	switch (i2c.state) {
 	case I2C_STATE_STARTING:
-		eeprom_start();
+		if (eeprom_start())
+			return 1;
 		i2c.state = I2C_STATE_SENDING_ADDRESS;
 		i2c.buffer = i2c.bitcnt = 0;
 		break;
@@ -887,7 +888,8 @@ static void i2c_pull_down_scl(void)
 		readwrite = i2c.buffer & 1;
 		if (readwrite == 1) {
 			i2c.state = I2C_STATE_RECEIVING_DATA;
-			i2c.buffer = eeprom_receive_frame();
+			if (eeprom_receive_frame(&i2c.buffer))
+				return 1;
 			i2c.bitcnt = 0;
 		} else {
 			i2c.state = I2C_STATE_SENDING_DATA;
@@ -917,7 +919,8 @@ static void i2c_pull_down_scl(void)
 		i2c.buffer <<= 1;
 		i2c.buffer |= i2c.sda;
 		if (++i2c.bitcnt == 8) {
-			eeprom_deliver_frame(i2c.buffer);
+			if (eeprom_deliver_frame(i2c.buffer))
+				return 1;
 			if (i2c.state == I2C_STATE_SENDING_ADDRESS)
 				i2c.state = I2C_STATE_RECEIVING_ADDRESS_ACK;
 			else
@@ -925,9 +928,10 @@ static void i2c_pull_down_scl(void)
 		}
 		break;
 	default:
-		panic("Invalid I2C sequence (state: %d)\n", i2c.state);
+		return panic("Invalid I2C sequence (state: %d)\n", i2c.state);
 	}
 	i2c.scl = 0;
+	return 0;
 }
 
 /*
@@ -1006,31 +1010,33 @@ static bool is_display_regs_byte_address(uint32_t addr)
 	return true;
 }
 
-static uint8_t display_read_byte_reg(uint32_t addr)
+static int display_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case DISPLAY_WIDHT_L_OFF:
-		return (DISPLAY_FB_WIDTH >> 1) & 0x00FF;
+		*val_p = (DISPLAY_FB_WIDTH >> 1) & 0x00FF;
+		return 0;
 	case DISPLAY_WIDHT_H_OFF:
-		return ((DISPLAY_FB_HEIGHT >> 1) & 0xFF00) >> 8;
+		*val_p = ((DISPLAY_FB_HEIGHT >> 1) & 0xFF00) >> 8;
+		return 0;
 	default:
 		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
-			panic("Unsupported display register 0x%.8x\n", addr);
-			return 0;
+			return panic("Unsupported display register 0x%.8x\n", addr);
 		} else {
 			notice("Reading from unknown display register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
+			*val_p = 0;
 			return 0;
 		}
 	}
 }
 
-static void display_write_byte_reg(uint32_t addr, uint8_t val)
+static int display_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
 	case DISPLAY_PAL_IDX_OFF:
 		display.pal_idx = val;
 		display.pal_rgb = 0;
-		return;
+		return 0;
 	case DISPLAY_PAL_DATA_OFF:
 		if (display.pal_rgb == 0)
 			display.pal[display.pal_idx] = 0xFF000000;	/* The alpha channel */
@@ -1041,12 +1047,14 @@ static void display_write_byte_reg(uint32_t addr, uint8_t val)
 			/* May wrap around here - no idea what happens on hardware */
 			++display.pal_idx;
 		}
-		return;
+		return 0;
 	default:
-		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
 			return panic("Unsupported display register 0x%.8x\n", addr);
-		else
-			return notice("Writing 0x%.2x to unknown display register 0x%.8x (PC: 0x%.8x)\n", val, addr, cpu.PC);
+		} else {
+			notice("Writing 0x%.2x to unknown display register 0x%.8x (PC: 0x%.8x)\n", val, addr, cpu.PC);
+			return 0;
+		}
 	}
 }
 
@@ -1137,14 +1145,13 @@ static bool is_compactflash_cis_byte_address(uint32_t addr)
 	return true;
 }
 
-static uint8_t compactflash_cis_read_byte_reg(uint32_t addr)
+static int compactflash_cis_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
-	if (addr < CF_CIS_OFF || addr >= CF_CIS_OFF + CF_CIS_SIZE) {
-		panic("BUG: Out of bounds CIS offset\n");
-		return 0;
-	}
+	if (addr < CF_CIS_OFF || addr >= CF_CIS_OFF + CF_CIS_SIZE)
+		return panic("BUG: Out of bounds CIS offset\n");
 	addr -= CF_CIS_OFF;
-	return cf_cis[addr >> 1];
+	*val_p = cf_cis[addr >> 1];
+	return 0;
 }
 
 /*
@@ -1266,68 +1273,72 @@ static bool is_cfcard_ata_word_address(uint32_t addr)
 	}
 }
 
-static void cfcard_ata_check_address_mode(uint32_t addr)
+static int cfcard_ata_check_address_mode(uint32_t addr)
 {
 	bool memmode, memmode_addr;
 
 	memmode = (cfcard.conf_opt & CF_CONFOPT_CONF_BITS) == CF_CONFOPT_CONF_MMAP;
 	memmode_addr = (addr & 0xFF000000) == 0x18000000;
 	if (memmode != memmode_addr)
-		panic("Incorrect CompactFlash configuration index to access address 0x%.8x\n", addr);
+		return panic("Incorrect CompactFlash configuration index to access address 0x%.8x\n", addr);
+	return 0;
 }
 
-static uint8_t cfcard_ata_read_byte_reg(uint32_t addr)
+static int cfcard_ata_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	uint8_t val;
 
-	cfcard_ata_check_address_mode(addr);
+	if (cfcard_ata_check_address_mode(addr))
+		return 1;
 
 	switch (addr) {
 	case CF_MEMMODE_DATA_OFF:
 	case CF_IOMODE_DATA_OFF:
 		/* Apparently the sector buffer can also be read one byte at a time */
 		if (!(cfcard.status & CF_STATUS_DRQ))
-			panic("Reading from CompactFlash buffer with no data request\n");
+			return panic("Reading from CompactFlash buffer with no data request\n");
 		if (cfcard.secbuf_off == CF_SECTOR_SZ)
-			panic("Attempted read from empty CompactFlash sector buffer\n");
+			return panic("Attempted read from empty CompactFlash sector buffer\n");
 		val = cfcard.secbuf[cfcard.secbuf_off++];
 		if (cfcard.secbuf_off == CF_SECTOR_SZ)
 			cfcard.status &= ~CF_STATUS_DRQ; /* Not certain here (TODO) */
-		return val;
+		*val_p = val;
+		return 0;
 	case CF_MEMMODE_STATCOMM_OFF:
 	case CF_IOMODE_STATCOMM_OFF:
-		return cfcard.status;
-	default:
-		panic("Attempted read from unsupported CompactFlash register at 0x%.8x\n", addr);
+		*val_p = cfcard.status;
 		return 0;
+	default:
+		return panic("Attempted read from unsupported CompactFlash register at 0x%.8x\n", addr);
 	}
 }
 
-static uint16_t cfcard_ata_read_word_reg(uint32_t addr)
+static int cfcard_ata_read_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	uint16_t val;
 
-	cfcard_ata_check_address_mode(addr);
+	if (cfcard_ata_check_address_mode(addr))
+		return 1;
 
 	switch (addr) {
 	case CF_MEMMODE_DATA_OFF:
 	case CF_IOMODE_DATA_OFF:
 		if (!(cfcard.status & CF_STATUS_DRQ))
-			panic("Reading from CompactFlash buffer with no data request\n");
+			return panic("Reading from CompactFlash buffer with no data request\n");
 		if (cfcard.secbuf_off >= CF_SECTOR_SZ - 1)
-			panic("Attempted read from empty CompactFlash sector buffer\n");
+			return panic("Attempted read from empty CompactFlash sector buffer\n");
 		val = cfcard.secbuf[cfcard.secbuf_off++];
 		val |= cfcard.secbuf[cfcard.secbuf_off++] << 8;
 		if (cfcard.secbuf_off == CF_SECTOR_SZ)
 			cfcard.status &= ~CF_STATUS_DRQ; /* Not certain here (TODO) */
-		return val;
-	default:
-		panic("Attempted read from unsupported CompactFlash register at 0x%.8x\n", addr);
+		*val_p = val;
 		return 0;
+	default:
+		return panic("Attempted read from unsupported CompactFlash register at 0x%.8x\n", addr);
 	}
 }
 
-static void cfcard_write_end(void)
+static int cfcard_write_end(void)
 {
 	uint32_t secnum;
 	size_t ret;
@@ -1354,26 +1365,29 @@ static void cfcard_write_end(void)
 	 */
 	if (fflush(card_file))
 		return panic("Failed fflush() for card file\n");
+	return 0;
 }
 
-static void cfcard_ata_write_word_reg(uint32_t addr, uint16_t val)
+static int cfcard_ata_write_word_reg(uint32_t addr, uint16_t val)
 {
-	cfcard_ata_check_address_mode(addr);
+	if (cfcard_ata_check_address_mode(addr))
+		return 1;
 
 	switch (addr) {
 	case CF_MEMMODE_DATA_OFF:
 	case CF_IOMODE_DATA_OFF:
 		if (!(cfcard.status & CF_STATUS_DRQ))
-			panic("Writing to CompactFlash buffer with no data request\n");
+			return panic("Writing to CompactFlash buffer with no data request\n");
 		if (cfcard.secbuf_off >= CF_SECTOR_SZ - 1)
-			panic("Attempted write to full CompactFlash sector buffer\n");
+			return panic("Attempted write to full CompactFlash sector buffer\n");
 		cfcard.secbuf[cfcard.secbuf_off++] = val & 0xFF;
 		cfcard.secbuf[cfcard.secbuf_off++] = val >> 8;
 		if (cfcard.secbuf_off == CF_SECTOR_SZ) {
-			cfcard_write_end();
+			if (cfcard_write_end())
+				return 1;
 			cfcard.status &= ~CF_STATUS_DRQ;
 		}
-		return;
+		return 0;
 	default:
 		return panic("Attempted write to unsupported CompactFlash register at 0x%.8x\n", addr);
 	}
@@ -1384,7 +1398,7 @@ static void cfcard_ata_write_word_reg(uint32_t addr, uint16_t val)
 #define ATA_WRITE_SECTOR	0x30
 #define ATA_IDENTIFY_DRIVE	0xEC
 
-static void cfcard_read_sector(void)
+static int cfcard_read_sector(void)
 {
 	uint32_t secnum;
 	size_t ret;
@@ -1415,9 +1429,10 @@ static void cfcard_read_sector(void)
 	}
 	cfcard.secbuf_off = 0;
 	cfcard.status |= CF_STATUS_DRQ;
+	return 0;
 }
 
-static void cfcard_write_begin(void)
+static int cfcard_write_begin(void)
 {
 	if (!(cfcard.cdh & CF_CDH_CHS_OR_LBA))
 		return panic("CompactFlash Cylinder/Head/Sector mode not supported\n");
@@ -1426,6 +1441,7 @@ static void cfcard_write_begin(void)
 
 	cfcard.secbuf_off = 0;
 	cfcard.status |= CF_STATUS_DRQ;
+	return 0;
 }
 
 /* Structure returned by the Identify Drive command. Must be kept packed. */
@@ -1473,7 +1489,7 @@ struct identify_drive_info {
 	uint16_t rsvd_8a[187];
 };
 
-static void cfcard_identify_drive(void)
+static int cfcard_identify_drive(void)
 {
 	struct identify_drive_info *idinfo = NULL;
 	uint32_t sector_count;
@@ -1517,9 +1533,10 @@ static void cfcard_identify_drive(void)
 	idinfo->secnum_ms = sector_count >> 16;
 
 	cfcard.status |= CF_STATUS_DRQ;
+	return 0;
 }
 
-static void cfcard_execute_command(uint8_t code)
+static int cfcard_execute_command(uint8_t code)
 {
 	if (!card_file)
 		return panic("ATA command without a card present\n");
@@ -1536,9 +1553,10 @@ static void cfcard_execute_command(uint8_t code)
 	}
 }
 
-static void cfcard_ata_write_byte_reg(uint32_t addr, uint8_t val)
+static int cfcard_ata_write_byte_reg(uint32_t addr, uint8_t val)
 {
-	cfcard_ata_check_address_mode(addr);
+	if (cfcard_ata_check_address_mode(addr))
+		return 1;
 
 	switch (addr) {
 	case CF_MEMMODE_DEVCON_OFF:
@@ -1549,23 +1567,23 @@ static void cfcard_ata_write_byte_reg(uint32_t addr, uint8_t val)
 			return panic("Interrupts for CompactFlash not supported\n");
 		/* The remaining bits are documented as "ignored" or "do not care" */
 		cfcard.dev_con = val;
-		return;
+		return 0;
 	case CF_MEMMODE_SECCNT_OFF:
 	case CF_IOMODE_SECCNT_OFF:
 		cfcard.sec_cnt = val;
-		return;
+		return 0;
 	case CF_MEMMODE_SECNUM_OFF:
 	case CF_IOMODE_SECNUM_OFF:
 		cfcard.sec_num = val;
-		return;
+		return 0;
 	case CF_MEMMODE_CYLLOW_OFF:
 	case CF_IOMODE_CYLLOW_OFF:
 		cfcard.cyl_low = val;
-		return;
+		return 0;
 	case CF_MEMMODE_CYLHIGH_OFF:
 	case CF_IOMODE_CYLHIGH_OFF:
 		cfcard.cyl_high = val;
-		return;
+		return 0;
 	case CF_MEMMODE_CDH_OFF:
 	case CF_IOMODE_CDH_OFF:
 		val |= CF_CDH_ALWAYS_ONE;
@@ -1574,7 +1592,7 @@ static void cfcard_ata_write_byte_reg(uint32_t addr, uint8_t val)
 		if (!(val & CF_CDH_CHS_OR_LBA))
 			return panic("CompactFlash Cylinder/Head/Sector mode not supported\n");
 		cfcard.cdh = val;
-		return;
+		return 0;
 	case CF_MEMMODE_STATCOMM_OFF:
 	case CF_IOMODE_STATCOMM_OFF:
 		return cfcard_execute_command(val);
@@ -1596,7 +1614,7 @@ static bool is_cfcard_config_byte_address(uint32_t addr)
 	}
 }
 
-static void cfcard_config_write_byte_reg(uint32_t addr, uint8_t val)
+static int cfcard_config_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	uint8_t conf;
 
@@ -1610,7 +1628,7 @@ static void cfcard_config_write_byte_reg(uint32_t addr, uint8_t val)
 		if (conf != CF_CONFOPT_CONF_MMAP && conf != CF_CONFOPT_CONF_IOMAP_SECN)
 			return panic("Unsupported CompactFlash configuration index %.2x\n", conf);
 		cfcard.conf_opt = val;
-		return;
+		return 0;
 	default:
 		return panic("Attempted write of 0x%.2x to unsupported CompactFlash register at 0x%.8x\n", val, addr);
 	}
@@ -1626,27 +1644,29 @@ static void cfcard_reset(void)
 	cfcard.status |= CF_STATUS_RDY;
 }
 
-static uint16_t motherboard_read_word_reg(uint32_t addr)
+static int motherboard_read_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
 	case MBOARD_STATUS_OFF:
-		return motherboard.status;
+		*val_p = motherboard.status;
+		return 0;
 	case MBOARD_BLINKCNT_OFF:
-		return motherboard.blinkcnt;
+		*val_p = motherboard.blinkcnt;
+		return 0;
 	case 0x12000000:
 	case 0x12000014:
 	case 0x12000044:
 	case 0x12000098:
 		/* No idea about these but keep going for now (TODO) */
 		notice("Reading from unknown motherboard register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
+		*val_p = 0;
 		return 0;
 	default:
-		panic("Attempted read of unsupported motherboard register at 0x%.8x\n", addr);
-		return 0;
+		return panic("Attempted read of unsupported motherboard register at 0x%.8x\n", addr);
 	}
 }
 
-static void motherboard_write_word_reg(uint32_t addr, uint16_t val)
+static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
 	case MBOARD_COMMANDS_OFF:
@@ -1665,14 +1685,15 @@ static void motherboard_write_word_reg(uint32_t addr, uint16_t val)
 		case 0x0008:
 		case 0x0002:
 		case 0x008a:
-			return notice("Ignoring unknown motherboard command 0x%.4x (PC: 0x%.8x)\n", val, cpu.PC);
+			notice("Ignoring unknown motherboard command 0x%.4x (PC: 0x%.8x)\n", val, cpu.PC);
+			break;
 		default:
 			return panic("Unsupported motherboard command 0x%.4x\n", val);
 		}
-		return;
+		return 0;
 	case MBOARD_BLINKCNT_OFF:
 		motherboard.blinkcnt = val;
-		return;
+		return 0;
 	case 0x1200006c:
 	case 0x12000034:
 	case 0x12000024:
@@ -1689,10 +1710,9 @@ static void motherboard_write_word_reg(uint32_t addr, uint16_t val)
 		 * Maybe this enables/disables CompactFlash? No idea (TODO).
 		 */
 		notice("Writing 0x%.4x to unknown motherboard register 0x%.8x (PC: 0x%.8x)\n", val, addr, cpu.PC);
-		return;
+		return 0;
 	default:
-		panic("Attempted write of 0x%.4x to unsupported motherboard register at 0x%.8x\n", val, addr);
-		return;
+		return panic("Attempted write of 0x%.4x to unsupported motherboard register at 0x%.8x\n", val, addr);
 	}
 }
 
@@ -1842,7 +1862,7 @@ static bool eeprom_is_valid_address(uint8_t addr)
 	return false;
 }
 
-static void eeprom_start(void)
+static int eeprom_start(void)
 {
 	eeprom_monitor_save_condition(true /* is_start */);
 
@@ -1854,12 +1874,12 @@ static void eeprom_start(void)
 	switch (eeprom.state) {
 	case EEPROM_WRITING_TO_POINTER:
 		eeprom.state = EEPROM_WAITING_FOR_COMMAND;
-		return;
+		return 0;
 	case EEPROM_STOPPED:
 		eeprom.state = EEPROM_WAITING_FOR_COMMAND;
-		return;
+		return 0;
 	default:
-		panic("EEPROM restarted at wrong time\n");
+		return panic("EEPROM restarted at wrong time\n");
 	}
 }
 
@@ -1869,15 +1889,13 @@ static void eeprom_stop(void)
 	eeprom_monitor_save_condition(false /* is_start */);
 }
 
-static void eeprom_write_to_pointer(uint8_t val)
+static int eeprom_write_to_pointer(uint8_t val)
 {
 	uint8_t ptr;
 
 	ptr = eeprom.ptr;
-	if (!eeprom_is_valid_address(ptr)) {
-		panic("BUG: Out of bounds EEPROM pointer\n");
-		return;
-	}
+	if (!eeprom_is_valid_address(ptr))
+		return panic("BUG: Out of bounds EEPROM pointer\n");
 	switch (ptr) {
 	case 0xfc:
 		eeprom.fc = val;
@@ -1890,56 +1908,49 @@ static void eeprom_write_to_pointer(uint8_t val)
 	}
 	/* Only one write at a time, it seems */
 	eeprom.state = EEPROM_DONE;
+	return 0;
 }
 
 /* Here the EEPROM processes the frame delivered through the i2c bus */
-static void eeprom_deliver_frame(uint8_t frame)
+static int eeprom_deliver_frame(uint8_t frame)
 {
 	eeprom_monitor_save_frame(frame, true /* to_eeprom */);
 
 	switch (eeprom.state) {
 	case EEPROM_STOPPED:
-		panic("BUG: EEPROM received frame while stopped\n");
-		return;
+		return panic("BUG: EEPROM received frame while stopped\n");
 	case EEPROM_UPDATING_POINTER:
-		if (!eeprom_is_valid_address(frame)) {
-			panic("Setting EEPROM pointer out of bounds (ptr: 0x%.2x)\n", frame);
-			return;
-		}
+		if (!eeprom_is_valid_address(frame))
+			return panic("Setting EEPROM pointer out of bounds (ptr: 0x%.2x)\n", frame);
 		eeprom.ptr = frame;
 		eeprom.state = EEPROM_WRITING_TO_POINTER;
-		return;
+		return 0;
 	case EEPROM_WRITING_TO_POINTER:
-		eeprom_write_to_pointer(frame);
-		return;
+		return eeprom_write_to_pointer(frame);
 	case EEPROM_WAITING_FOR_COMMAND:
-		if (frame == EEPROM_COMMAND_WRITE) {
+		if (frame == EEPROM_COMMAND_WRITE)
 			eeprom.state = EEPROM_UPDATING_POINTER;
-		} else if (frame == EEPROM_COMMAND_READ) {
+		else if (frame == EEPROM_COMMAND_READ)
 			eeprom.state = EEPROM_READING_FROM_POINTER;
-		} else {
-			panic("Unknown EEPROM command frame 0x%.2x\n", frame);
-			return;
-		}
-		return;
+		else
+			return panic("Unknown EEPROM command frame 0x%.2x\n", frame);
+		return 0;
 	case EEPROM_READING_FROM_POINTER:
-		panic("EEPROM received frame while reading\n");
-		return;
+		return panic("EEPROM received frame while reading\n");
 	case EEPROM_DONE:
-		panic("EEPROM received frame while waiting for stop\n");
-		return;
+		return panic("EEPROM received frame while waiting for stop\n");
+	default:
+		return panic("BUG: nonexistent EEPROM state\n");
 	}
 }
 
-static uint8_t eeprom_read_from_pointer(void)
+static int eeprom_read_from_pointer(uint8_t *val_p)
 {
 	uint8_t ptr, val;
 
 	ptr = eeprom.ptr;
-	if (!eeprom_is_valid_address(ptr)) {
-		panic("BUG: Out of bounds EEPROM pointer\n");
-		return 0;
-	}
+	if (!eeprom_is_valid_address(ptr))
+		return panic("BUG: Out of bounds EEPROM pointer\n");
 	switch (ptr) {
 	case 0xfc:
 		val = eeprom.fc;
@@ -1953,21 +1964,22 @@ static uint8_t eeprom_read_from_pointer(void)
 
 	/* Only one write at a time, it seems */
 	eeprom.state = EEPROM_DONE;
-	return val;
+	*val_p = val;
+	return 0;
 }
 
-static uint8_t eeprom_receive_frame(void)
+static int eeprom_receive_frame(uint8_t *frame_p)
 {
 	uint8_t frame;
 
-	if (eeprom.state != EEPROM_READING_FROM_POINTER) {
-		panic("Invalid EEPROM read attempt\n");
-		return 0;
-	}
+	if (eeprom.state != EEPROM_READING_FROM_POINTER)
+		return panic("Invalid EEPROM read attempt\n");
 
-	frame = eeprom_read_from_pointer();
+	if (eeprom_read_from_pointer(&frame))
+		return 1;
 	eeprom_monitor_save_frame(frame, false /* to_eeprom */);
-	return frame;
+	*frame_p = frame;
+	return 0;
 }
 
 /*
@@ -2258,7 +2270,7 @@ struct ioports {
 #define IOPORTS_PLDR_OFF	0x04000134
 #define IOPORTS_SCPDR_OFF	0x04000136
 
-static void pfc_write_word_reg(uint32_t addr, uint16_t val)
+static int pfc_write_word_reg(uint32_t addr, uint16_t val)
 {
 	uint16_t *reg = NULL;
 
@@ -2266,10 +2278,8 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 
 	switch (addr) {
 	case PFC_PCCR_OFF:
-		if ((*reg ^ val) & ~(PFC_PC6_MASK | PFC_PC4_MASK | PFC_PC1_MASK | PFC_PC0_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (C: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PC6_MASK | PFC_PC4_MASK | PFC_PC1_MASK | PFC_PC0_MASK))
+			return panic("Attempted PFC operation for unsupported pins (C: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PC6_MASK) {
 			if ((val & PFC_PC6_MASK) != 0)
 				return panic("Unsupported PC6 configuration 0x%.4x\n", val);
@@ -2291,12 +2301,10 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 			notice("MCS4 pin function enabled\n");
 		}
 		*reg = val;
-		return;
+		return 0;
 	case PFC_PDCR_OFF:
-		if ((*reg ^ val) & ~(PFC_PD7_MASK | PFC_PD6_MASK | PFC_PD5_MASK | PFC_PD3_MASK | PFC_PD1_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (D: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PD7_MASK | PFC_PD6_MASK | PFC_PD5_MASK | PFC_PD3_MASK | PFC_PD1_MASK))
+			return panic("Attempted PFC operation for unsupported pins (D: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PD7_MASK) {
 			if ((val & PFC_PD7_MASK) != PFC_PD7MD0)
 				return panic("Unsupported PD7 configuration 0x%.4x\n", val);
@@ -2326,16 +2334,13 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 		} else if ((val & PFC_PD1_MASK) == PFC_PD1_OUT) {
 			front4_requested = !(ioports.PDDR & 0x02);
 		} else {
-			panic("Unsupported PD1 configuration 0x%.4x\n", val);
-			return;
+			return panic("Unsupported PD1 configuration 0x%.4x\n", val);
 		}
 		*reg = val;
-		return;
+		return 0;
 	case PFC_PECR_OFF:
-		if ((*reg ^ val) & ~(PFC_PE7_MASK | PFC_PE5_MASK | PFC_PE3_MASK | PFC_PE2_MASK | PFC_PE0_MASK | PFC_PE1_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (E: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PE7_MASK | PFC_PE5_MASK | PFC_PE3_MASK | PFC_PE2_MASK | PFC_PE0_MASK | PFC_PE1_MASK))
+			return panic("Attempted PFC operation for unsupported pins (E: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PE7_MASK) {
 			if ((val & PFC_PE7_MASK) != PFC_PE7MD0)
 				return panic("Unsupported PE7 configuration 0x%.4x\n", val);
@@ -2352,19 +2357,17 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 			notice("Unknown pin PE3 set to output\n");
 		}
 		/* TODO: is releasing the pin different from pulling it up for us? */
-		if ((val & PFC_PE2_MASK) == PFC_PE2MD0) {
+		if ((val & PFC_PE2_MASK) == PFC_PE2MD0)
 			ioports.PEDR & 0x04 ? i2c_release_sda() : i2c_pull_down_sda();
-		} else if ((val & PFC_PE2_MASK) == PFC_PE2MD1) {
+		else if ((val & PFC_PE2_MASK) == PFC_PE2MD1)
 			i2c_release_sda();
-		} else {
-			panic("Unsupported PE2 configuration 0x%.4x\n", val);
-			return;
-		}
+		else
+			return panic("Unsupported PE2 configuration 0x%.4x\n", val);
 		if ((*reg ^ val) & PFC_PE0_MASK) {
 			if ((val & PFC_PE0_MASK) == PFC_PE0MD0)
 				write_flag_to_byte(&touchscreen.state, TOUCH_STATE_PE0DT, ioports.PEDR & 0x01);
 			else if ((val & PFC_PE0_MASK) != PFC_PE0MD1)
-				panic("Unsupported PE0 configuration 0x%.4x\n", val);
+				return panic("Unsupported PE0 configuration 0x%.4x\n", val);
 		}
 		if ((*reg ^ val) & PFC_PE1_MASK) {
 			if ((val & PFC_PE1_MASK) == PFC_PE1MD0)
@@ -2373,12 +2376,10 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 				return panic("Unsupported PE1 configuration 0x%.4x\n", val);
 		}
 		*reg = val;
-		return;
+		return 0;
 	case PFC_PFCR_OFF:
-		if ((*reg ^ val) & ~(PFC_PF7_MASK | PFC_PF4_MASK | PFC_PF3_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (F: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PF7_MASK | PFC_PF4_MASK | PFC_PF3_MASK))
+			return panic("Attempted PFC operation for unsupported pins (F: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PF7_MASK) {
 			if ((val & PFC_PF7_MASK) != (PFC_PF7MD0 | PFC_PF7MD1))
 				return panic("Unsupported PF7 configuration 0x%.4x\n", val);
@@ -2393,12 +2394,10 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 				return panic("Unsupported PF3 configuration 0x%.4x\n", val);
 		}
 		*reg = val;
-		return;
+		return 0;
 	case PFC_PGCR_OFF:
-		if ((*reg ^ val) & ~(PFC_PG0_MASK | PFC_PG5_MASK | PFC_PG7_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (G: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PG0_MASK | PFC_PG5_MASK | PFC_PG7_MASK))
+			return panic("Attempted PFC operation for unsupported pins (G: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PG5_MASK) {
 			if ((val & PFC_PG5_MASK) == PFC_PG5MD0)
 				notice("Unknown pin PG5 set to reserved\n");
@@ -2412,17 +2411,13 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 				return panic("Unsupported PG7 configuration 0x%.4x\n", val);
 			notice("Unknown pin PG7 set to input with pullup off\n");
 		}
-		if ((val & PFC_PG0_MASK) != PFC_PG0MD1) {
-			panic("Unsupported PG0 configuration 0x%.4x\n", val);
-			return;
-		}
+		if ((val & PFC_PG0_MASK) != PFC_PG0MD1)
+			return panic("Unsupported PG0 configuration 0x%.4x\n", val);
 		*reg = val; /* Pullup MOS on... does that matter here? TODO */
-		return;
+		return 0;
 	case PFC_PHCR_OFF:
-		if ((*reg ^ val) & ~(PFC_PH7_MASK | PFC_PH6_MASK | PFC_PH5_MASK | PFC_PH4_MASK | PFC_PH3_MASK | PFC_PH2_MASK | PFC_PH1_MASK | PFC_PH0_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (H: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PH7_MASK | PFC_PH6_MASK | PFC_PH5_MASK | PFC_PH4_MASK | PFC_PH3_MASK | PFC_PH2_MASK | PFC_PH1_MASK | PFC_PH0_MASK))
+			return panic("Attempted PFC operation for unsupported pins (H: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PH7_MASK) {
 			if ((val & PFC_PH7_MASK) != PFC_PH7MD0)
 				return panic("Unsupported PH7 configuration 0x%.4x\n", val);
@@ -2462,12 +2457,10 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 			notice("Unknown pin PH0 set to input with pullup off\n");
 		}
 		*reg = val;
-		return;
+		return 0;
 	case PFC_PJCR_OFF:
-		if ((*reg ^ val) & ~(PFC_PJ1_MASK | PFC_PJ3_MASK | PFC_PJ4_MASK | PFC_PJ5_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (J: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PJ1_MASK | PFC_PJ3_MASK | PFC_PJ4_MASK | PFC_PJ5_MASK))
+			return panic("Attempted PFC operation for unsupported pins (J: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PJ1_MASK) {
 			if ((val & PFC_PJ1_MASK) != PFC_PJ1MD0)
 				return panic("Unsupported PJ1 configuration 0x%.4x\n", val);
@@ -2480,8 +2473,7 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 				/* How is this possible? Is the EEPROM disabled by now? TODO */
 				notice("Pin PJ3 set to \"CASLH/CASU output (BSC)\"\n");
 			} else {
-				panic("Unsupported PJ3 configuration 0x%.4x\n", val);
-				return;
+				return panic("Unsupported PJ3 configuration 0x%.4x\n", val);
 			}
 		}
 		if ((*reg ^ val) & PFC_PJ4_MASK) {
@@ -2498,28 +2490,22 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 			}
 		}
 		*reg = val;
-		return;
+		return 0;
 	case PFC_PLCR_OFF:
-		if ((*reg ^ val) & ~(PFC_PL1_MASK | PFC_PL2_MASK | PFC_PL4_MASK | PFC_PL5_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (L: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_PL1_MASK | PFC_PL2_MASK | PFC_PL4_MASK | PFC_PL5_MASK))
+			return panic("Attempted PFC operation for unsupported pins (L: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		/*
 		 * PL1 and PL2 are used as analog input pins for the A/D converter, so
 		 * I would have expected their configuration to be "Other function".
 		 * They get set to "Reserved" instead. I guess that works the same? Odd.
 		 */
 		if ((*reg ^ val) & PFC_PL1_MASK) {
-			if ((val & PFC_PL1_MASK) != PFC_PL1MD0) {
-				panic("Unsupported PL1 configuration 0x%.4x\n", val);
-				return;
-			}
+			if ((val & PFC_PL1_MASK) != PFC_PL1MD0)
+				return panic("Unsupported PL1 configuration 0x%.4x\n", val);
 		}
 		if ((*reg ^ val) & PFC_PL2_MASK) {
-			if ((val & PFC_PL2_MASK) != PFC_PL2MD0) {
-				panic("Unsupported PL2 configuration 0x%.4x\n", val);
-				return;
-			}
+			if ((val & PFC_PL2_MASK) != PFC_PL2MD0)
+				return panic("Unsupported PL2 configuration 0x%.4x\n", val);
 		}
 		if ((*reg ^ val) & PFC_PL4_MASK) {
 			if ((val & PFC_PL4_MASK) != PFC_PL4MD1)
@@ -2532,27 +2518,21 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 			notice("Unknown pin PL5 set to input\n");
 		}
 		*reg = val;
-		return;
+		return 0;
 	case PFC_SCPCR_OFF:
-		if ((*reg ^ val) & ~(PFC_SCP0_MASK | PFC_SCP1_MASK | PFC_SCP3_MASK | PFC_SCP6_MASK | PFC_SCP7_MASK)) {
-			panic("Attempted PFC operation for unsupported pins (SC: 0x%.4x -> 0x%.4x)\n", *reg, val);
-			return;
-		}
+		if ((*reg ^ val) & ~(PFC_SCP0_MASK | PFC_SCP1_MASK | PFC_SCP3_MASK | PFC_SCP6_MASK | PFC_SCP7_MASK))
+			return panic("Attempted PFC operation for unsupported pins (SC: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_SCP0_MASK) {
-			if ((val & PFC_SCP0_MASK) == PFC_SCP0MD0) {
+			if ((val & PFC_SCP0_MASK) == PFC_SCP0MD0)
 				write_flag_to_byte(&touchscreen.state, TOUCH_STATE_SCP0DT, ioports.SCPDR & 0x01);
-			} else {
-				panic("Unsupported SCP0 configuration 0x%.4x\n", val);
-				return;
-			}
+			else
+				return panic("Unsupported SCP0 configuration 0x%.4x\n", val);
 		}
 		if ((*reg ^ val) & PFC_SCP1_MASK) {
-			if ((val & PFC_SCP1_MASK) == PFC_SCP1MD0) {
+			if ((val & PFC_SCP1_MASK) == PFC_SCP1MD0)
 				write_flag_to_byte(&touchscreen.state, TOUCH_STATE_SCP1DT, ioports.SCPDR & 0x02);
-			} else {
-				panic("Unsupported SCP1 configuration 0x%.4x\n", val);
-				return;
-			}
+			else
+				return panic("Unsupported SCP1 configuration 0x%.4x\n", val);
 		}
 		if ((*reg ^ val) & PFC_SCP3_MASK) {
 			if ((val & PFC_SCP3_MASK) != PFC_SCP3MD0)
@@ -2570,16 +2550,15 @@ static void pfc_write_word_reg(uint32_t addr, uint16_t val)
 			notice("Unknown pin SCP7 set to input with pullup off\n");
 		}
 		*reg = val;
-		return;
+		return 0;
 	default:
 		/*
 		 * These are all "other function", save for a few that are "reserved".
 		 * I don't think any emulation is necessary.
 		 */
 		if (val == 0)
-			return;
-		panic("Attempted write of 0x%.4x to unsupported PFC register at 0x%.8x\n", val, addr);
-		return;
+			return 0;
+		return panic("Attempted write of 0x%.4x to unsupported PFC register at 0x%.8x\n", val, addr);
 	}
 }
 
@@ -2616,17 +2595,15 @@ static bool is_ioports_byte_address(uint32_t addr)
 		notice("Output of %u through unknown pin %s\n", val, #pin);	\
 	} while (false)
 
-static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
+static int ioports_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	uint16_t control;
 
 	switch (addr) {
 	case IOPORTS_PDDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PDCR_OFF - PFC_REGS_OFF));
-		if (val & ~0x82) {
-			panic("Attempted write to unsupported pin (D:0x%.2x)\n", val);
-			return;
-		}
+		if (val & ~0x82)
+			return panic("Attempted write to unsupported pin (D:0x%.2x)\n", val);
 		/*
 		 * The interrupt handler for the front row of buttons at <0x80036D6C>
 		 * writes zero to PD1DT before reading the pins for each button. So I'm
@@ -2637,17 +2614,13 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 		if ((control & PFC_PD7_MASK) == PFC_PD7MD0)
 			NOTICE_PIN(PD7, val >> 7);
 		ioports.PDDR = val & 0xAF;
-		return;
+		return 0;
 	case IOPORTS_PEDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PECR_OFF - PFC_REGS_OFF));
-		if (val & ~0xdf) {
-			panic("Attempted write to unsupported pin (E:0x%.2x)\n", val);
-			return;
-		}
-		if ((val & 0x40) && ((control & PFC_PE6_MASK) == PFC_PE6MD0)) {
-			panic("Attempted output through input pin PTE6\n");
-			return;
-		}
+		if (val & ~0xdf)
+			return panic("Attempted write to unsupported pin (E:0x%.2x)\n", val);
+		if ((val & 0x40) && ((control & PFC_PE6_MASK) == PFC_PE6MD0))
+			return panic("Attempted output through input pin PTE6\n");
 		if ((control & PFC_PE7_MASK) == PFC_PE7MD0)
 			NOTICE_PIN(PE7, val >> 7);
 		if ((control & PFC_PE4_MASK) == PFC_PE4MD0)
@@ -2661,32 +2634,30 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 		if ((control & PFC_PE1_MASK) == PFC_PE1MD0)
 			write_flag_to_byte(&touchscreen.state, TOUCH_STATE_PE1DT, val & 0x02);
 		ioports.PEDR = val;
-		return;
+		return 0;
 	case IOPORTS_PGDR_OFF:
 		/*
 		 * According to the manual, writes to this register are just ignored.
 		 * Oddly, this acutally seems to happen during boot.
 		 */
-		return;
+		return 0;
 	case IOPORTS_PHDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PHCR_OFF - PFC_REGS_OFF));
-		if (val & ~0x80) {
-			panic("Attempted write to unsupported pin (H:0x%.2x)\n", val);
-			return;
-		}
+		if (val & ~0x80)
+			return panic("Attempted write to unsupported pin (H:0x%.2x)\n", val);
 		if ((control & PFC_PH7_MASK) == PFC_PH7MD0)
 			NOTICE_PIN(PH7, val >> 7);
 		ioports.PHDR = val & 0x80;
-		return;
+		return 0;
 	case IOPORTS_PJDR_OFF:
 		/* TODO: usually the same for all pins, so reuse code somehow */
 		control = *(uint16_t *)(pfc_regs + (PFC_PJCR_OFF - PFC_REGS_OFF));
-		if (val & ~0x38) {
-			panic("Attempted write to unsupported pin (J:0x%.2x)\n", val);
-			return;
+		if (val & ~0x38)
+			return panic("Attempted write to unsupported pin (J:0x%.2x)\n", val);
+		if ((control & PFC_PJ3_MASK) == PFC_PJ3MD0) {
+			if (val & 0x08 ? i2c_pull_up_scl() : i2c_pull_down_scl())
+				return 1;
 		}
-		if ((control & PFC_PJ3_MASK) == PFC_PJ3MD0)
-			val & 0x08 ? i2c_pull_up_scl() : i2c_pull_down_scl();
 		if ((control & PFC_PJ4_MASK) == PFC_PJ4MD0)
 			NOTICE_PIN(PJ4, (val & 0x10) >> 4);
 		if ((control & PFC_PJ5_MASK) == PFC_PJ5MD0) {
@@ -2695,7 +2666,7 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 				cfcard_reset();
 		}
 		ioports.PJDR = val;
-		return;
+		return 0;
 	case IOPORTS_SCPDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_SCPCR_OFF - PFC_REGS_OFF));
 		if (val & ~0x4B)
@@ -2713,14 +2684,13 @@ static void ioports_write_byte_reg(uint32_t addr, uint8_t val)
 		if ((control & PFC_SCP6_MASK) == PFC_SCP6MD0)
 			NOTICE_PIN(SCP4, (val & 0x40) >> 6);
 		ioports.SCPDR = val;
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported IO register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported IO register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t ioports_read_byte_reg(uint32_t addr)
+static int ioports_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	uint16_t control;
 	uint8_t val;
@@ -2732,11 +2702,10 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 	case IOPORTS_PCDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PCCR_OFF - PFC_REGS_OFF));
 		/* TODO: this looks backwards? We should be reading from the pins */
-		if (control != 0xAAAA) {
-			panic("Unsupported configuration for Port C (0x%.4x)\n", control);
-			return 0;
-		}
-		return ioports.PCDR;
+		if (control != 0xAAAA)
+			return panic("Unsupported configuration for Port C (0x%.4x)\n", control);
+		*val_p = ioports.PCDR;
+		return 0;
 	case IOPORTS_PDDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PDCR_OFF - PFC_REGS_OFF));
 		if ((control & PFC_PD1_MASK) == PFC_PD1_IN) {
@@ -2749,8 +2718,7 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 		} else if ((control & PFC_PD1_MASK) == PFC_PD1_OUT) {
 			write_flag_to_byte(&val, 1U << 1, ioports.PDDR & (1U << 1));
 		} else {
-			panic("Unsupported configuration for Port D (0x%.4x)\n", control);
-			return 0;
+			return panic("Unsupported configuration for Port D (0x%.4x)\n", control);
 		}
 		if (!(control & PFC_PD3MD1))
 			write_flag_to_byte(&val, 1U << 3, ioports.PDDR & (1U << 3));
@@ -2758,7 +2726,8 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			write_flag_to_byte(&val, 1U << 5, ioports.PDDR & (1U << 5));
 		if (!(control & PFC_PD7MD1))
 			write_flag_to_byte(&val, 1U << 7, ioports.PDDR & (1U << 7));
-		return val;
+		*val_p = val;
+		return 0;
 	case IOPORTS_PEDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PECR_OFF - PFC_REGS_OFF));
 		if (control & PFC_PE2MD1)
@@ -2780,20 +2749,21 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 		else if (!(control & PFC_PE0MD0))
 			write_flag_to_byte(&val, 1U << 0, 1);
 		else
-			panic("Unsupported configuration for Port E (0x%.4x)\n", control);
+			return panic("Unsupported configuration for Port E (0x%.4x)\n", control);
 		if (!(control & PFC_PE1MD1))
 			write_flag_to_byte(&val, 1U << 1, ioports.PEDR & (1U << 1));
 		else if (!(control & PFC_PE1MD0))
 			write_flag_to_byte(&val, 1U << 1, 0);
 		else
-			panic("Unsupported configuration for Port E (0x%.4x)\n", control);
+			return panic("Unsupported configuration for Port E (0x%.4x)\n", control);
 		if (!(control & PFC_PE3MD1))
 			write_flag_to_byte(&val, 1U << 3, ioports.PEDR & (1U << 3));
 		if (!(control & PFC_PE5MD1))
 			write_flag_to_byte(&val, 1U << 5, ioports.PEDR & (1U << 5));
 		if (!(control & PFC_PE7MD1))
 			write_flag_to_byte(&val, 1U << 7, ioports.PEDR & (1U << 7));
-		return val;
+		*val_p = val;
+		return 0;
 	case IOPORTS_PFDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PFCR_OFF - PFC_REGS_OFF));
 		/* Input pins PF0-7 are for the PINT8-15 interrupts */
@@ -2818,7 +2788,8 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			write_flag_to_byte(&val, 1U << 0, !(button_state & BUTTON_UP_PUSHED));
 		else
 			write_flag_to_byte(&val, 1U << 0, false);
-		return val;
+		*val_p = val;
+		return 0;
 	case IOPORTS_PGDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PGCR_OFF - PFC_REGS_OFF));
 		if (!(control & PFC_PG5MD1))
@@ -2829,7 +2800,8 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			write_flag_to_byte(&val, 1U << 1, !(button_state & BUTTON_QL3_PUSHED));
 		if (control & PFC_PG0MD1)
 			write_flag_to_byte(&val, 1U << 0, !(button_state & BUTTON_QL4_PUSHED));
-		return val;
+		*val_p = val;
+		return 0;
 	case IOPORTS_PHDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PHCR_OFF - PFC_REGS_OFF));
 		if (!(control & PFC_PH1MD1))
@@ -2838,14 +2810,14 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			/* This reads the value of the IRQ3 pin */
 			write_flag_to_byte(&val, 1U << 3, touchscreen.x >= 0);
 		} else {
-			panic("Unsupported configuration for Port H (0x%.4x)\n", control);
-			return 0;
+			return panic("Unsupported configuration for Port H (0x%.4x)\n", control);
 		}
 		if (!(control & PFC_PH5MD1))
 			write_flag_to_byte(&val, 1U << 5, false);
 		if (!(control & PFC_PH7MD1))
 			write_flag_to_byte(&val, 1U << 7, ioports.PHDR & (1U << 7));
-		return val;
+		*val_p = val;
+		return 0;
 	case IOPORTS_PJDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PJCR_OFF - PFC_REGS_OFF));
 		if (!(control & PFC_PJ1MD1))
@@ -2858,29 +2830,26 @@ static uint8_t ioports_read_byte_reg(uint32_t addr)
 			write_flag_to_byte(&val, 1U << 4, ioports.PJDR & (1U << 4));
 		if (!(control & PFC_PJ5MD1))
 			write_flag_to_byte(&val, 1U << 5, ioports.PJDR & (1U << 5));
-		return val;
+		*val_p = val;
+		return 0;
 	case IOPORTS_SCPDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_SCPCR_OFF - PFC_REGS_OFF));
-		if ((control & PFC_SCP0_MASK) == PFC_SCP0MD0) {
+		if ((control & PFC_SCP0_MASK) == PFC_SCP0MD0)
 			write_flag_to_byte(&val, 1U << 0, ioports.SCPDR & (1U << 0));
-		} else {
-			panic("Unsupported configuration for Port SC (0x%.4x)\n", control);
-			return 0;
-		}
-		if ((control & PFC_SCP1_MASK) == PFC_SCP1MD0) {
+		else
+			return panic("Unsupported configuration for Port SC (0x%.4x)\n", control);
+		if ((control & PFC_SCP1_MASK) == PFC_SCP1MD0)
 			write_flag_to_byte(&val, 1U << 1, ioports.SCPDR & (1U << 1));
-		} else {
-			panic("Unsupported configuration for Port SC (0x%.4x)\n", control);
-			return 0;
-		}
+		else
+			return panic("Unsupported configuration for Port SC (0x%.4x)\n", control);
 		if (!(control & PFC_SCP3MD1))
 			write_flag_to_byte(&val, 1U << 3, ioports.SCPDR & (1U << 3));
 		if (!(control & PFC_SCP6MD1))
 			write_flag_to_byte(&val, 1U << 6, ioports.SCPDR & (1U << 6));
-		return val;
-	default:
-		panic("Attempted read from unsupported IO register at 0x%.8x\n", addr);
+		*val_p = val;
 		return 0;
+	default:
+		return panic("Attempted read from unsupported IO register at 0x%.8x\n", addr);
 	}
 }
 
@@ -2952,7 +2921,7 @@ static void console_monitor_save_bytes(struct console_monitor *mon, const char *
 
 	/* We will always have enough space, but just in case... */
 	if (left < inlen + 1) {
-		panic("BUG: Overflow while monitoring a console\n");
+		(void)panic("BUG: Overflow while monitoring a console\n");
 		return;
 	}
 	memcpy(buf, bytes, inlen);
@@ -2984,7 +2953,7 @@ static void console_monitor_save_byte(struct console_monitor *mon, uint8_t byte)
 	return console_monitor_save_bytes(mon, buf, sizeof(buf) - 1);
 }
 
-static void xB3A_write_byte_reg(uint32_t addr, uint8_t val)
+static int xB3A_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
 	case XB3A_014_OFF:
@@ -3007,16 +2976,16 @@ static void xB3A_write_byte_reg(uint32_t addr, uint8_t val)
 	case XB3A_1F0_OFF:
 	case XB3A_1F8_OFF:
 		/* Do nothing, for now */
-		return;
+		return 0;
 	case XB3A_18C_OFF:
-		return console_monitor_save_byte(&xB3A_monitor, val);
+		console_monitor_save_byte(&xB3A_monitor, val);
+		return 0;
 	default:
-		panic("Attempted write to unsupported xB3A register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported xB3A register at 0x%.8x\n", addr);
 	}
 }
 
-static void xB3A_write_word_reg(uint32_t addr, uint8_t val)
+static int xB3A_write_word_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
 	case USB_UNKCNT_OFF:
@@ -3028,20 +2997,20 @@ static void xB3A_write_word_reg(uint32_t addr, uint8_t val)
 		 * accessed as a word, I'm guessing it's not actually part of the same
 		 * device or whatever.
 		 */
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported xB3A register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported xB3A register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t xB3A_read_byte_reg(uint32_t addr)
+static int xB3A_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	static unsigned int readcnt = 0;
 
 	/* Just return something that matches whatever the firmware expects */
 	switch (addr) {
 	case XB3A_014_OFF:
+		*val_p = 0;
 		return 0;
 	case XB3A_13C_OFF:
 		/*
@@ -3052,18 +3021,22 @@ static uint8_t xB3A_read_byte_reg(uint32_t addr)
 		 */
 		if (++readcnt == 200)
 			readcnt = 0;
-		return readcnt < 100 ? 0x00 : 0x25;
-	case XB3A_19C_OFF:
-		return 0x02;
-	case XB3A_1A4_OFF:
-		return 0x08;
-	case XB3A_1A8_OFF:
-		return 0x12;
-	case XB3A_1A0_OFF:
-		return 0x00;
-	default:
-		panic("Attempted read from unsupported xB3A register at 0x%.8x\n", addr);
+		*val_p = readcnt < 100 ? 0x00 : 0x25;
 		return 0;
+	case XB3A_19C_OFF:
+		*val_p = 0x02;
+		return 0;
+	case XB3A_1A4_OFF:
+		*val_p = 0x08;
+		return 0;
+	case XB3A_1A8_OFF:
+		*val_p = 0x12;
+		return 0;
+	case XB3A_1A0_OFF:
+		*val_p = 0x00;
+		return 0;
+	default:
+		return panic("Attempted read from unsupported xB3A register at 0x%.8x\n", addr);
 	}
 }
 
@@ -3135,38 +3108,38 @@ static bool is_dmac_longword_address(uint32_t addr)
 	}
 }
 
-static void dmac_write_word_reg(uint32_t addr, uint16_t val)
+static int dmac_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
 	case DMAC_CMSTR_OFF:
 		if (val)
 			return panic("DMAC compare match timer not supported (0x%.2x)\n", val);
-		return;
+		return 0;
 	default:
 		return panic("Attempted write to unsupported DMAC register at 0x%.8x\n", addr);
 	}
 }
 
-static uint32_t dmac_read_longword_reg(uint32_t addr)
+static int dmac_read_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
 	case DMAC_CHCR0_OFF:
 	case DMAC_CHCR2_OFF:
+		*val_p = 0;
 		return 0;
 	default:
-		panic("Attempted read of unsupported DMAC register at 0x%.8x\n", addr);
-		return 0;
+		return panic("Attempted read of unsupported DMAC register at 0x%.8x\n", addr);
 	}
 }
 
-static void dmac_write_longword_reg(uint32_t addr, uint32_t val)
+static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 {
 	switch (addr) {
 	case DMAC_CHCR0_OFF:
 	case DMAC_CHCR2_OFF:
 		if (val)
 			return panic("DMAC not supported (0x%.2x)\n", val);
-		return;
+		return 0;
 	default:
 		return panic("Attempted write to unsupported DMAC register at 0x%.8x\n", addr);
 	}
@@ -3290,24 +3263,25 @@ static bool is_cpg_word_address(uint32_t addr)
 	return addr == CPG_FRQCR_OFF;
 }
 
-static uint16_t cpg_read_word_reg(uint32_t addr)
+static int cpg_read_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
 	case CPG_FRQCR_OFF:
-		return cpg.FRQCR;
-	default:
-		panic("BUG: nonexistent register for the clock pulse generator\n");
+		*val_p = cpg.FRQCR;
 		return 0;
+	default:
+		return panic("BUG: nonexistent register for the clock pulse generator\n");
 	}
 }
 
-static void cpg_write_word_reg(uint32_t addr, uint16_t val)
+static int cpg_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
 	case CPG_FRQCR_OFF:
 		/* TODO: actually implement this register */
 		cpg.FRQCR = val;
-		return notice("CPG Frequency control register set to 0x%.4x\n", val);
+		notice("CPG Frequency control register set to 0x%.4x\n", val);
+		return 0;
 	default:
 		return panic("BUG: nonexistent register for the clock pulse generator\n");
 	}
@@ -3605,7 +3579,7 @@ static bool is_cache_longword_address(uint32_t addr)
 	}
 }
 
-static void cache_write_longword_reg(uint32_t addr, uint32_t val)
+static int cache_write_longword_reg(uint32_t addr, uint32_t val)
 {
 	/*
 	 * I don't think I need to implement the cache because software will expect
@@ -3618,7 +3592,7 @@ static void cache_write_longword_reg(uint32_t addr, uint32_t val)
 	if (addr >= CACHE_ADDR_MAP_OFF && addr < CACHE_ADDR_MAP_OFF + CACHE_ADDR_MAP_LEN) {
 		if (val != 0)
 			return panic("Attempt to manage the cache contents at 0x%.8x\n", addr);
-		return;
+		return 0;
 	}
 
 	switch (addr) {
@@ -3626,20 +3600,20 @@ static void cache_write_longword_reg(uint32_t addr, uint32_t val)
 		if (val & ~CCR_BIT_MASK)
 			return panic("Bad value set on CCR\n");
 		cache.CCR = val;
-		return;
+		return 0;
 	default:
 		return panic("Attempted write to unsupported cache register at 0x%.8x\n", addr);
 	}
 }
 
-static uint32_t cache_read_longword_reg(uint32_t addr)
+static int cache_read_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
 	case CACHE_CCR_OFF:
-		return cache.CCR;
-	default:
-		panic("Attempted read from unsupported cache register at 0x%.8x\n", addr);
+		*val_p = cache.CCR;
 		return 0;
+	default:
+		return panic("Attempted read from unsupported cache register at 0x%.8x\n", addr);
 	}
 }
 
@@ -3844,7 +3818,7 @@ static int mmu_virt_to_index(uint32_t va)
 	return (va >> 12) & 0x1F;
 }
 
-static void mmu_load_pte_to_tlb(void)
+static int mmu_load_pte_to_tlb(void)
 {
 	uint32_t tlb_addr, tlb_data;
 	uint32_t *tlb_addr_p = NULL, *tlb_data_p = NULL;
@@ -3886,23 +3860,24 @@ static void mmu_load_pte_to_tlb(void)
 
 	*tlb_addr_p = tlb_addr;
 	*tlb_data_p = tlb_data;
+	return 0;
 }
 
-static void mmu_write_longword_reg(uint32_t addr, uint32_t val)
+static int mmu_write_longword_reg(uint32_t addr, uint32_t val)
 {
 	switch (addr) {
 	case MMU_PTEH_OFF:
 		mmu.PTEH = val & PTEH_BIT_MASK;
-		break;
+		return 0;
 	case MMU_PTEL_OFF:
 		mmu.PTEL = val & PTEL_BIT_MASK;
-		break;
+		return 0;
 	case MMU_TTB_OFF:
 		mmu.TTB = val;
-		break;
+		return 0;
 	case MMU_TEA_OFF:
 		mmu.TEA = val;
-		break;
+		return 0;
 	case MMU_MMUCR_OFF:
 		if (val & MMUCR_TF)
 			mmu_flush_tlb();
@@ -3917,21 +3892,20 @@ static void mmu_write_longword_reg(uint32_t addr, uint32_t val)
 		 * idea what that means, so I'll just ignore those bits as usual.
 		 */
 		mmu.MMUCR = val & MMUCR_BIT_MASK;
-		break;
+		return 0;
 	default:
-		panic("Attempted write to unsupported MMU register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported MMU register at 0x%.8x\n", addr);
 	}
 }
 
-static uint32_t mmu_read_longword_reg(uint32_t addr)
+static int mmu_read_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
 	case MMU_PTEH_OFF:
-		return mmu.PTEH;
-	default:
-		panic("Attempted read from unsupported MMU register at 0x%.8x\n", addr);
+		*val_p = mmu.PTEH;
 		return 0;
+	default:
+		return panic("Attempted read from unsupported MMU register at 0x%.8x\n", addr);
 	}
 }
 
@@ -3952,7 +3926,7 @@ static int mmu_virt_to_area(uint32_t va)
 		if (va >= mmu_area_offs[i])
 			return i;
 	}
-	panic("BUG: va not covered by any area\n");
+	(void)panic("BUG: va not covered by any area\n");
 	return 0;
 }
 
@@ -3975,19 +3949,23 @@ static uint32_t mmu_tlb_to_pa(uint32_t tlb_data)
 #define PAGE_MASK	(~((1 << 10) - 1))
 
 /* TODO: handle overlaps between mmu and debugger mappings */
-static uint32_t mmu_virt_to_phys(uint32_t va)
+static int mmu_virt_to_phys(uint32_t va, uint32_t *pa)
 {
 	int area, entry, way;
 	uint32_t tlb_addr, tlb_data, vpage_addr;
 
 	/* No translation if the mmu is disabled */
-	if (!(mmu.MMUCR & MMUCR_AT))
-		return va;
+	if (!(mmu.MMUCR & MMUCR_AT)) {
+		*pa = va;
+		return 0;
+	}
 
 	/* Only vm areas P0 and P3 get translated */
 	area = mmu_virt_to_area(va);
-	if (area != 0 && area != 3)
-		return va;
+	if (area != 0 && area != 3) {
+		*pa = va;
+		return 0;
+	}
 
 	vpage_addr = va & PAGE_MASK;
 
@@ -3998,12 +3976,13 @@ static uint32_t mmu_virt_to_phys(uint32_t va)
 		tlb_data = mmu.tlb_data[entry][way];
 		if (!(tlb_addr & TLB_V))
 			continue;
-		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr)
-			return mmu_tlb_to_pa(tlb_data) + (va - vpage_addr);
+		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr) {
+			*pa = mmu_tlb_to_pa(tlb_data) + (va - vpage_addr);
+			return 0;
+		}
 	}
 
-	panic("Page faults not yet implemented\n");
-	return 0;
+	return panic("Page faults not yet implemented\n");
 }
 
 
@@ -4260,85 +4239,91 @@ static uint32_t mock_va_translation(uint32_t addr)
 #define DEBUG_PRINT(...)	do {} while (0)
 #endif
 
-static uint16_t read_scif_word_reg(uint32_t addr)
+static int read_scif_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
 	case SCIF_SCSSR2_OFF:
 		scif.SCSSR2_unread = 0;
-		return scif.SCSSR2;
-	case SCIF_SCFDR2_OFF:
-		return (scif.SCFTDR2_count << 8) & scif.SCFRDR2_count;
-	default:
-		panic("Attempted read of unsupported SCIF register at 0x%.8x\n", addr);
+		*val_p = scif.SCSSR2;
 		return 0;
+	case SCIF_SCFDR2_OFF:
+		*val_p = (scif.SCFTDR2_count << 8) & scif.SCFRDR2_count;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported SCIF register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t read_scif_byte_reg(uint32_t addr)
+static int read_scif_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case SCIF_SCSMR2_OFF:
-		return scif.SCSMR2;
+		*val_p = scif.SCSMR2;
+		return 0;
 	case SCIF_SCBRR2_OFF:
-		return scif.SCBRR2;
+		*val_p = scif.SCBRR2;
+		return 0;
 	case SCIF_SCSCR2_OFF:
-		return scif.SCSCR2;
+		*val_p = scif.SCSCR2;
+		return 0;
 	case SCIF_SCFRDR2_OFF:
-		if (scif.SCFRDR2_count == 0)
-			return 0; /* "Undefined", so whatever */
+		if (scif.SCFRDR2_count == 0) {
+			*val_p = 0; /* "Undefined", so whatever */
+			return 0;
+		}
 		if (scif.SCFRDR2_count == 1)
 			scif.SCSSR2 &= ~SCSSR2_RDF;
 		/* TODO: data ready bit? */
-		return scif.SCFRDR2[--scif.SCFRDR2_count];
+		*val_p = scif.SCFRDR2[--scif.SCFRDR2_count];
+		return 0;
 	case SCIF_SCFCR2_OFF:
-		return scif.SCFCR2;
+		*val_p = scif.SCFCR2;
+		return 0;
 	case SCIF_SCFTDR2_OFF:
 	default:
-		panic("Attempted read of unsupported SCIF register at 0x%.8x\n", addr);
-		return 0;
+		return panic("Attempted read of unsupported SCIF register at 0x%.8x\n", addr);
 	}
 }
 
-static void write_scif_word_reg(uint32_t addr, uint16_t val)
+static int write_scif_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
 	case SCIF_SCSSR2_OFF:
 		val &= scif.SCSSR2; /* No flags can be set to 1 by a write */
 		scif.SCSSR2 = (scif.SCSSR2 & scif.SCSSR2_unread) | val;
-		return;
+		return 0;
 	case SCIF_SCFDR2_OFF:
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported SCIF register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported SCIF register at 0x%.8x\n", addr);
 	}
 }
 
-static void write_scif_byte_reg(uint32_t addr, uint8_t val)
+static int write_scif_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
 	case SCIF_SCSMR2_OFF:
 		/* TODO: character length could matter? Is this register even used? */
 		scif.SCSMR2 = val & 0x7BU;
-		return;
+		return 0;
 	case SCIF_SCBRR2_OFF:
 		scif.SCBRR2 = val;
-		return;
+		return 0;
 	case SCIF_SCSCR2_OFF:
 		scif.SCSCR2 = val & SCSCR2_BIT_MASK;
-		return;
+		return 0;
 	case SCIF_SCFTDR2_OFF:
 		/* TODO: generic fifo structure? Ring buffer implementation? */
 		if (scif.SCFTDR2_count == 16)
-			return;
+			return 0;
 		memmove(&scif.SCFTDR2[1], &scif.SCFTDR2[0], scif.SCFTDR2_count++);
 		scif.SCFTDR2[0] = val;
 		scif.SCSSR2 &= ~(SCSSR2_TEND | SCSSR2_TDFE);
 		/* TODO: serial interrupts? Are they even used by the jornada? */
-		return;
+		return 0;
 	case SCIF_SCFRDR2_OFF:
 		/* TODO: exception or something? Not documented */
-		return;
+		return 0;
 	case SCIF_SCFCR2_OFF:
 		if (val & ~(SCFCR2_RFRST | SCFCR2_TFRST))
 			return panic("Unsupported control command for SCIF FIFO (0x%.4x)\n", val);
@@ -4346,78 +4331,85 @@ static void write_scif_byte_reg(uint32_t addr, uint8_t val)
 			scif.SCFRDR2_count = 0;
 		if (val & SCFCR2_TFRST)
 			scif.SCFTDR2_count = 0;
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported SCIF register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported SCIF register at 0x%.8x\n", addr);
 	}
 }
 
-static uint32_t read_tmu_longword_reg(uint32_t addr)
+static int read_tmu_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
 	case TMU_TCOR0_OFF:
-		return tmu.TCOR[0];
-	case TMU_TCNT0_OFF:
-		return tmu.TCNT[0];
-	case TMU_TCOR1_OFF:
-		return tmu.TCOR[1];
-	case TMU_TCNT1_OFF:
-		return tmu.TCNT[1];
-	case TMU_TCOR2_OFF:
-		return tmu.TCOR[2];
-	case TMU_TCNT2_OFF:
-		return tmu.TCNT[2];
-	case TMU_TCPR2_OFF:
-		return tmu.TCPR2;
-	default:
-		panic("Attempted read of unsupported TMU register at 0x%.8x\n", addr);
+		*val_p = tmu.TCOR[0];
 		return 0;
+	case TMU_TCNT0_OFF:
+		*val_p = tmu.TCNT[0];
+		return 0;
+	case TMU_TCOR1_OFF:
+		*val_p = tmu.TCOR[1];
+		return 0;
+	case TMU_TCNT1_OFF:
+		*val_p = tmu.TCNT[1];
+		return 0;
+	case TMU_TCOR2_OFF:
+		*val_p = tmu.TCOR[2];
+		return 0;
+	case TMU_TCNT2_OFF:
+		*val_p = tmu.TCNT[2];
+		return 0;
+	case TMU_TCPR2_OFF:
+		*val_p = tmu.TCPR2;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported TMU register at 0x%.8x\n", addr);
 	}
 }
 
-static uint16_t read_tmu_word_reg(uint32_t addr)
+static int read_tmu_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
 	case TMU_TCR0_OFF:
-		return tmu.TCR[0];
-	case TMU_TCR1_OFF:
-		return tmu.TCR[1];
-	case TMU_TCR2_OFF:
-		return tmu.TCR[2];
-	default:
-		panic("Attempted read of unsupported TMU register at 0x%.8x\n", addr);
+		*val_p = tmu.TCR[0];
 		return 0;
+	case TMU_TCR1_OFF:
+		*val_p = tmu.TCR[1];
+		return 0;
+	case TMU_TCR2_OFF:
+		*val_p = tmu.TCR[2];
+		return 0;
+	default:
+		return panic("Attempted read of unsupported TMU register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t read_tmu_byte_reg(uint32_t addr)
+static int read_tmu_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case TMU_TOCR_OFF:
-		return tmu.TOCR;
-	case TMU_TSTR_OFF:
-		return tmu.TSTR;
-	default:
-		panic("Attempted read of unsupported TMU register at 0x%.8x\n", addr);
+		*val_p = tmu.TOCR;
 		return 0;
+	case TMU_TSTR_OFF:
+		*val_p = tmu.TSTR;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported TMU register at 0x%.8x\n", addr);
 	}
 }
 
-static void tmu_write_byte_reg(uint32_t addr, uint8_t val)
+static int tmu_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
 	case TMU_TSTR_OFF:
 		val &= TSTR_BIT_MASK;
 		tmu.TSTR = val;
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported TMU register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported TMU register at 0x%.8x\n", addr);
 	}
 }
 
-static void tmu_write_word_reg(uint32_t addr, uint16_t val)
+static int tmu_write_word_reg(uint32_t addr, uint16_t val)
 {
 	uint16_t *tcr = NULL;
 	uint16_t preserved_bits;
@@ -4437,99 +4429,99 @@ static void tmu_write_word_reg(uint32_t addr, uint16_t val)
 	case TMU_TCR0_OFF:
 	case TMU_TCR1_OFF:
 	case TMU_TCR2_OFF:
-		if (val & TCR_ICPE) {
-			panic("Unsupported input capture function for TCR (0x%.2x)\n", val);
-			return;
-		}
-		if (val & TCR_CKEG) {
-			panic("Unsupported timer configuration for TCR (0x%.2x)\n", val);
-			return;
-		}
-		if ((val & TCR_TPSC) >= 6) {
-			panic("Reserved TCNT clock input (TCR: 0x%.2x)\n", val);
-			return;
-		} else if ((val & TCR_TPSC) == 5) {
-			panic("Unsupported TCNT external clock input (TCR: 0x%.2x)\n", val);
-			return;
-		}
+		if (val & TCR_ICPE)
+			return panic("Unsupported input capture function for TCR (0x%.2x)\n", val);
+		if (val & TCR_CKEG)
+			return panic("Unsupported timer configuration for TCR (0x%.2x)\n", val);
+		if ((val & TCR_TPSC) >= 6)
+			return panic("Reserved TCNT clock input (TCR: 0x%.2x)\n", val);
+		else if ((val & TCR_TPSC) == 5)
+			return panic("Unsupported TCNT external clock input (TCR: 0x%.2x)\n", val);
 		preserved_bits = val & TCR_UNSETTABLE_MASK;
 		val = (val & ~preserved_bits) | (*tcr & preserved_bits);
 		*tcr = val;
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported TMU register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported TMU register at 0x%.8x\n", addr);
 	}
 }
 
-static void tmu_write_longword_reg(uint32_t addr, uint32_t val)
+static int tmu_write_longword_reg(uint32_t addr, uint32_t val)
 {
 	switch (addr) {
 	case TMU_TCOR0_OFF:
 		tmu.TCOR[0] = val;
-		break;
+		return 0;
 	case TMU_TCNT0_OFF:
 		tmu.TCNT[0] = val;
-		break;
+		return 0;
 	case TMU_TCOR1_OFF:
 		tmu.TCOR[1] = val;
-		break;
+		return 0;
 	case TMU_TCNT1_OFF:
 		tmu.TCNT[1] = val;
-		break;
+		return 0;
 	case TMU_TCOR2_OFF:
 		tmu.TCOR[2] = val;
-		break;
+		return 0;
 	case TMU_TCNT2_OFF:
 		tmu.TCNT[2] = val;
-		break;
+		return 0;
 	default:
-		panic("Attempted write to unsupported TMU register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported TMU register at 0x%.8x\n", addr);
 	}
 }
 
-static uint32_t read_ubc_longword_reg(uint32_t addr)
+static int read_ubc_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
 	case UBC_BARA_OFF:
-		return ubc.BARA;
-	case UBC_BAMRA_OFF:
-		return ubc.BAMRA;
-	case UBC_BARB_OFF:
-		return ubc.BARB;
-	case UBC_BAMRB_OFF:
-		return ubc.BAMRB;
-	case UBC_BDRB_OFF:
-		return ubc.BDRB;
-	case UBC_BDMRB_OFF:
-		return ubc.BDMRB;
-	case UBC_BRCR_OFF:
-		return ubc.BRCR;
-	case UBC_BRSR_OFF:
-		return ubc.BRSR;
-	case UBC_BRDR_OFF:
-		return ubc.BRDR;
-	default:
-		panic("Attempted read of unsupported UBC register at 0x%.8x\n", addr);
+		*val_p = ubc.BARA;
 		return 0;
+	case UBC_BAMRA_OFF:
+		*val_p = ubc.BAMRA;
+		return 0;
+	case UBC_BARB_OFF:
+		*val_p = ubc.BARB;
+		return 0;
+	case UBC_BAMRB_OFF:
+		*val_p = ubc.BAMRB;
+		return 0;
+	case UBC_BDRB_OFF:
+		*val_p = ubc.BDRB;
+		return 0;
+	case UBC_BDMRB_OFF:
+		*val_p = ubc.BDMRB;
+		return 0;
+	case UBC_BRCR_OFF:
+		*val_p = ubc.BRCR;
+		return 0;
+	case UBC_BRSR_OFF:
+		*val_p = ubc.BRSR;
+		return 0;
+	case UBC_BRDR_OFF:
+		*val_p = ubc.BRDR;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported UBC register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t read_pdm_reg(uint32_t addr)
+static int read_pdm_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case PDM_STBCR_OFF:
-		return pdm.STBCR;
-	case PDM_STBCR2_OFF:
-		return pdm.STBCR2;
-	default:
-		panic("Attempted read of unsupported pdm register at 0x%.8x\n", addr);
+		*val_p = pdm.STBCR;
 		return 0;
+	case PDM_STBCR2_OFF:
+		*val_p = pdm.STBCR2;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported pdm register at 0x%.8x\n", addr);
 	}
 }
 
-static void pdm_write_byte_reg(uint32_t addr, uint8_t val)
+static int pdm_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
 	case PDM_STBCR2_OFF:
@@ -4542,7 +4534,7 @@ static void pdm_write_byte_reg(uint32_t addr, uint8_t val)
 		if (val & STBCR2_MSTP7)
 			notice("Clock supply to DMAC is halted\n");
 		else
-			panic("Started clock supply to unsupported DMAC\n");
+			return panic("Started clock supply to unsupported DMAC\n");
 		/*
 		 * It seems that all these other clocks also get stopped later. TODO:
 		 * maybe don't let these components work while their clock is stopped.
@@ -4553,13 +4545,13 @@ static void pdm_write_byte_reg(uint32_t addr, uint8_t val)
 		notice("Clock supply to SCIF is %s\n", val & STBCR2_MSTP4 ? "halted" : "running");
 		notice("Clock supply to IrDA is %s\n", val & STBCR2_MSTP3 ? "halted" : "running");
 		pdm.STBCR2 = val;
-		return;
+		return 0;
 	default:
 		return panic("Attempted write to unsupported pdm register at 0x%.8x\n", addr);
 	}
 }
 
-static void intc_write_byte_reg(uint32_t addr, uint16_t val)
+static int intc_write_byte_reg(uint32_t addr, uint16_t val)
 {
 	uint8_t preserved_bits;
 
@@ -4571,14 +4563,13 @@ static void intc_write_byte_reg(uint32_t addr, uint16_t val)
 		preserved_bits |= (IRR0_PINT0R | IRR0_PINT1R);
 		val = (val & ~preserved_bits) | (rtc.RCR1 & preserved_bits);
 		intc.IRR0 = val;
-		return;
+		return 0;
 	case INTC_IRR1_OFF:
 	case INTC_IRR2_OFF:
 		/* Read-only registers, but the firmware does try to set them to 0 */
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported INTC register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported INTC register at 0x%.8x\n", addr);
 	}
 }
 
@@ -4588,7 +4579,7 @@ static bool pint_detected(int i)
 	enum pin_sense_mode mode;
 
 	if (i < 8 || i > 12) {
-		panic("Unsupported PINT line %d\n", i); /* Should be a bug actually */
+		(void)panic("BUG: unsupported PINT line %d\n", i);
 		return false;
 	}
 
@@ -4614,7 +4605,7 @@ static void pint_refresh(void)
 	write_flag_to_byte(&intc.IRR0, IRR0_PINT1R, interrupt);
 }
 
-static void intc_write_word_reg(uint32_t addr, uint16_t val)
+static int intc_write_word_reg(uint32_t addr, uint16_t val)
 {
 	/*
 	 * Some registers have bits that _should_ always be written as zero, but
@@ -4624,195 +4615,215 @@ static void intc_write_word_reg(uint32_t addr, uint16_t val)
 	switch (addr) {
 	case INTC_ICR0_OFF:
 		intc.ICR0 = val & 0x0100U;
-		return;
+		return 0;
 	case INTC_ICR1_OFF:
 		intc.ICR1 = val; /* TODO: "write 1 to these bits is inhibited" */
-		return;
+		return 0;
 	case INTC_ICR2_OFF:
 		intc.ICR2 = val;
 		pint_refresh();
-		return;
+		return 0;
 	case INTC_PINTER_OFF:
 		intc.PINTER = val;
 		pint_refresh();
-		return;
+		return 0;
 	case INTC_IPRA_OFF:
 		intc.IPRA = val;
-		return;
+		return 0;
 	case INTC_IPRB_OFF:
 		intc.IPRB = val;
-		return;
+		return 0;
 	case INTC_IPRC_OFF:
 		intc.IPRC = val;
-		return;
+		return 0;
 	case INTC_IPRD_OFF:
 		intc.IPRD = val;
-		return;
+		return 0;
 	case INTC_IPRE_OFF:
 		intc.IPRE = val;
-		return;
+		return 0;
 	default:
-		panic("Attempted write to unsupported INTC register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write to unsupported INTC register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t intc_read_byte_reg(uint32_t addr)
+static int intc_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case INTC_IRR0_OFF:
-		return intc.IRR0;
-	case INTC_IRR1_OFF:
-		return intc.IRR1;
-	case INTC_IRR2_OFF:
-		return intc.IRR2;
-	default:
-		panic("Attempted read of unsupported INTC register at 0x%.8x\n", addr);
+		*val_p = intc.IRR0;
 		return 0;
+	case INTC_IRR1_OFF:
+		*val_p = intc.IRR1;
+		return 0;
+	case INTC_IRR2_OFF:
+		*val_p = intc.IRR2;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported INTC register at 0x%.8x\n", addr);
 	}
 }
 
-static uint16_t intc_read_word_reg(uint32_t addr)
+static int intc_read_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
 	case INTC_ICR0_OFF:
-		return intc.ICR0;
-	case INTC_ICR1_OFF:
-		return intc.ICR1;
-	case INTC_ICR2_OFF:
-		return intc.ICR2;
-	case INTC_PINTER_OFF:
-		return intc.PINTER;
-	case INTC_IPRA_OFF:
-		return intc.IPRA;
-	case INTC_IPRB_OFF:
-		return intc.IPRB;
-	case INTC_IPRC_OFF:
-		return intc.IPRB;
-	case INTC_IPRD_OFF:
-		return intc.IPRB;
-	case INTC_IPRE_OFF:
-		return intc.IPRB;
-	default:
-		panic("Attempted read of unsupported INTC register at 0x%.8x\n", addr);
+		*val_p = intc.ICR0;
 		return 0;
+	case INTC_ICR1_OFF:
+		*val_p = intc.ICR1;
+		return 0;
+	case INTC_ICR2_OFF:
+		*val_p = intc.ICR2;
+		return 0;
+	case INTC_PINTER_OFF:
+		*val_p = intc.PINTER;
+		return 0;
+	case INTC_IPRA_OFF:
+		*val_p = intc.IPRA;
+		return 0;
+	case INTC_IPRB_OFF:
+		*val_p = intc.IPRB;
+		return 0;
+	case INTC_IPRC_OFF:
+		*val_p = intc.IPRB;
+		return 0;
+	case INTC_IPRD_OFF:
+		*val_p = intc.IPRB;
+		return 0;
+	case INTC_IPRE_OFF:
+		*val_p = intc.IPRB;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported INTC register at 0x%.8x\n", addr);
 	}
 }
 
-static void write_rtc_reg(uint32_t addr, uint8_t val)
+static int write_rtc_reg(uint32_t addr, uint8_t val)
 {
 	/* TODO: implement the counters and alarm for real */
 	switch (addr) {
 	case RTC_R64CNT_OFF:
-		panic("Attempted write to R64CNT register\n");
-		return;
+		return panic("Attempted write to R64CNT register\n");
 	case RTC_RSECCNT_OFF:
 		rtc.RSECCNT = val & 0x7FU;
-		return;
+		return 0;
 	case RTC_RMINCNT_OFF:
 		rtc.RMINCNT = val & 0x7FU;
-		return;
+		return 0;
 	case RTC_RHRCNT_OFF:
 		rtc.RHRCNT = val & 0x3FU;
-		return;
+		return 0;
 	case RTC_RWKCNT_OFF:
 		rtc.RWKCNT = val & 0x07U;
-		return;
+		return 0;
 	case RTC_RDAYCNT_OFF:
 		rtc.RDAYCNT = val & 0x3FU;
-		return;
+		return 0;
 	case RTC_RMONCNT_OFF:
 		rtc.RMONCNT = val & 0x1FU;
-		return;
+		return 0;
 	case RTC_RYRCNT_OFF:
 		rtc.RYRCNT = val;
-		return;
+		return 0;
 	case RTC_RSECAR_OFF:
 		rtc.RSECAR = val;
-		return;
+		return 0;
 	case RTC_RMINAR_OFF:
 		rtc.RMINAR = val;
-		return;
+		return 0;
 	case RTC_RHRAR_OFF:
 		rtc.RHRAR = val & 0xBFU;
-		return;
+		return 0;
 	case RTC_RWKAR_OFF:
 		rtc.RWKAR = val & 0x87U;
-		return;
+		return 0;
 	case RTC_RDAYAR_OFF:
 		rtc.RDAYAR = val & 0xBFU;
-		return;
+		return 0;
 	case RTC_RMONAR_OFF:
 		rtc.RMONAR = val & 0x9FU;
-		return;
+		return 0;
 	case RTC_RCR1_OFF:
 		if (val & RCR1_UNSETTABLE_MASK) {
 			uint8_t preserved_bits = val & RCR1_UNSETTABLE_MASK;
 			val = (val & ~preserved_bits) | (rtc.RCR1 & preserved_bits);
 		}
 		rtc.RCR1 = val & RCR1_BIT_MASK;
-		return;
+		return 0;
 	case RTC_RCR2_OFF:
 		/*
 		 * TODO: I haven't encountered writes to this register yet so, once I
 		 * do, I should review all the bits carefully.
 		 */
-		if (val & (RCR2_ADJ | RCR2_PEF | RCR2_PES)) {
-			panic("Unsupported RTC configuration");
-			return;
-		}
+		if (val & (RCR2_ADJ | RCR2_PEF | RCR2_PES))
+			return panic("Unsupported RTC configuration");
 		if (val & RCR2_RESET)
 			rtc.R64CNT = 0;
 		rtc.RCR2 = val & 0xF9U;	/* The rest always read 0 */
-		return;
+		return 0;
 	default:
-		panic("Attempted write of unsupported RTC register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write of unsupported RTC register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t read_rtc_reg(uint32_t addr)
+static int read_rtc_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
 	case RTC_R64CNT_OFF:
-		return rtc.R64CNT;
-	case RTC_RSECCNT_OFF:
-		return rtc.RSECCNT;
-	case RTC_RMINCNT_OFF:
-		return rtc.RMINCNT;
-	case RTC_RHRCNT_OFF:
-		return rtc.RHRCNT;
-	case RTC_RWKCNT_OFF:
-		return rtc.RWKCNT;
-	case RTC_RDAYCNT_OFF:
-		return rtc.RDAYCNT;
-	case RTC_RMONCNT_OFF:
-		return rtc.RMONCNT;
-	case RTC_RYRCNT_OFF:
-		return rtc.RYRCNT;
-	case RTC_RSECAR_OFF:
-		return rtc.RSECAR;
-	case RTC_RMINAR_OFF:
-		return rtc.RMINAR;
-	case RTC_RHRAR_OFF:
-		return rtc.RHRAR;
-	case RTC_RWKAR_OFF:
-		return rtc.RWKAR;
-	case RTC_RDAYAR_OFF:
-		return rtc.RDAYAR;
-	case RTC_RMONAR_OFF:
-		return rtc.RMONAR;
-	case RTC_RCR1_OFF:
-		return rtc.RCR1;
-	case RTC_RCR2_OFF:
-		return rtc.RCR2;
-	default:
-		panic("Attempted read of unsupported RTC register at 0x%.8x\n", addr);
+		*val_p = rtc.R64CNT;
 		return 0;
+	case RTC_RSECCNT_OFF:
+		*val_p = rtc.RSECCNT;
+		return 0;
+	case RTC_RMINCNT_OFF:
+		*val_p = rtc.RMINCNT;
+		return 0;
+	case RTC_RHRCNT_OFF:
+		*val_p = rtc.RHRCNT;
+		return 0;
+	case RTC_RWKCNT_OFF:
+		*val_p = rtc.RWKCNT;
+		return 0;
+	case RTC_RDAYCNT_OFF:
+		*val_p = rtc.RDAYCNT;
+		return 0;
+	case RTC_RMONCNT_OFF:
+		*val_p = rtc.RMONCNT;
+		return 0;
+	case RTC_RYRCNT_OFF:
+		*val_p = rtc.RYRCNT;
+		return 0;
+	case RTC_RSECAR_OFF:
+		*val_p = rtc.RSECAR;
+		return 0;
+	case RTC_RMINAR_OFF:
+		*val_p = rtc.RMINAR;
+		return 0;
+	case RTC_RHRAR_OFF:
+		*val_p = rtc.RHRAR;
+		return 0;
+	case RTC_RWKAR_OFF:
+		*val_p = rtc.RWKAR;
+		return 0;
+	case RTC_RDAYAR_OFF:
+		*val_p = rtc.RDAYAR;
+		return 0;
+	case RTC_RMONAR_OFF:
+		*val_p = rtc.RMONAR;
+		return 0;
+	case RTC_RCR1_OFF:
+		*val_p = rtc.RCR1;
+		return 0;
+	case RTC_RCR2_OFF:
+		*val_p = rtc.RCR2;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported RTC register at 0x%.8x\n", addr);
 	}
 }
 
-static void write_nonsdmr_bsc_reg(uint32_t addr, uint16_t val)
+static int write_nonsdmr_bsc_reg(uint32_t addr, uint16_t val)
 {
 	/*
 	 * Some registers have bits that _should_ always be written as zero, but
@@ -4822,22 +4833,22 @@ static void write_nonsdmr_bsc_reg(uint32_t addr, uint16_t val)
 	switch (addr) {
 	case BSC_BCR1_OFF:
 		bsc.BCR1 = val;
-		return;
+		return 0;
 	case BSC_BCR2_OFF:
 		bsc.BCR2 = val & 0x3FF0U;
-		return;
+		return 0;
 	case BSC_WCR1_OFF:
 		bsc.WCR1 = val & 0xBFF3U;
-		return;
+		return 0;
 	case BSC_WCR2_OFF:
 		bsc.WCR2 = val;
-		return;
+		return 0;
 	case BSC_MCR_OFF:
 		bsc.MCR = val;
-		return;
+		return 0;
 	case BSC_PCR_OFF:
 		bsc.PCR = val & 0xCFFFU;
-		return;
+		return 0;
 	case BSC_RTCSR_OFF:
 		/* Some bits are ignored if they are set to 1 */
 		if (val & RTCSR_UNSETTABLE_MASK) {
@@ -4845,108 +4856,116 @@ static void write_nonsdmr_bsc_reg(uint32_t addr, uint16_t val)
 			val = (val & ~preserved_bits) | (bsc.RTCSR & preserved_bits);
 		}
 		bsc.RTCSR = val & 0x00FFU;
-		return;
+		return 0;
 	case BSC_RTCNT_OFF:
 		if ((val & 0xFF00U) != 0xA500U)
-			panic("Bad value set on RTCNT!\n");
+			return panic("Bad value set on RTCNT!\n");
 		bsc.RTCNT = val & 0x00FFU;
-		return;
+		return 0;
 	case BSC_RTCOR_OFF:
 		if ((val & 0xFF00U) != 0xA500U)
-			panic("Bad value set on RTCOR!\n");
+			return panic("Bad value set on RTCOR!\n");
 		bsc.RTCOR = val & 0x00FFU;
-		return;
+		return 0;
 	case BSC_RFCR_OFF:
 		if ((val & 0xFC00U) != 0xA400U)
-			panic("Bad value set on RFCR!\n");
+			return panic("Bad value set on RFCR!\n");
 		bsc.RFCR = val & 0x03FFU;
-		return;
+		return 0;
 	case BSC_MCSCR0_OFF:
 		bsc.MCSCR[0] = val & 0x007FU;
 		notice("Control register for unused pin MCS0 set to 0x%.4x\n", bsc.MCSCR[0]);
-		return;
+		return 0;
 	case BSC_MCSCR1_OFF:
 		bsc.MCSCR[1] = val & 0x007FU;
 		notice("Control register for unused pin MCS1 set to 0x%.4x\n", bsc.MCSCR[1]);
-		return;
+		return 0;
 	case BSC_MCSCR2_OFF:
 		bsc.MCSCR[2] = val & 0x007FU;
 		notice("Control register for unused pin MCS2 set to 0x%.4x\n", bsc.MCSCR[2]);
-		return;
+		return 0;
 	case BSC_MCSCR3_OFF:
 		bsc.MCSCR[3] = val & 0x007FU;
 		notice("Control register for unused pin MCS3 set to 0x%.4x\n", bsc.MCSCR[3]);
-		return;
+		return 0;
 	case BSC_MCSCR4_OFF:
 		bsc.MCSCR[4] = val & 0x007FU;
 		if (val == (MCSCR_CAP1 | MCSCR_CAP0))
 			notice("MCS4 will get asserted on access to physical range 0x00000000:0x02000000\n");
 		else
-			panic("Wrong MCS4 pin output configuration 0x%.4x\n", val);
-		return;
+			return panic("Wrong MCS4 pin output configuration 0x%.4x\n", val);
+		return 0;
 	case BSC_MCSCR5_OFF:
 		bsc.MCSCR[5] = val & 0x007FU;
 		notice("Control register for unused pin MCS5 set to 0x%.4x\n", bsc.MCSCR[5]);
-		return;
+		return 0;
 	case BSC_MCSCR6_OFF:
 		bsc.MCSCR[6] = val & 0x007FU;
 		/* This range is for USB commands; no idea what makes it "mask ROM" */
 		if (val == (MCSCR_CS20 | MCSCR_A25 | MCSCR_A24 | MCSCR_A23 | MCSCR_A22))
 			notice("MCS6 will get asserted on access to physical range 0x0BC00000:0x0C000000\n");
 		else
-			panic("Wrong MCS6 pin output configuration 0x%.4x\n", val);
-		return;
+			return panic("Wrong MCS6 pin output configuration 0x%.4x\n", val);
+		return 0;
 	case BSC_MCSCR7_OFF:
 		bsc.MCSCR[7] = val & 0x007FU;
 		notice("Control register for unused pin MCS7 set to 0x%.4x\n", bsc.MCSCR[7]);
-		return;
+		return 0;
 	default:
-		panic("Attempted write of unsupported BSC register at 0x%.8x\n", addr);
-		return;
+		return panic("Attempted write of unsupported BSC register at 0x%.8x\n", addr);
 	}
 }
 
-static void write_sdmr_bsc_reg(uint32_t addr, uint8_t val)
+static int write_sdmr_bsc_reg(uint32_t addr, uint8_t val)
 {
 	/*
 	 * These registers are write-only and concern hardware behaviour, so I don't
 	 * think I need any detail in the emulation. My firmware always uses this
 	 * address, which sets CAS latency to 2, whatever that means.
 	 */
-	if (addr != 0xFFFFE880) {
-		panic("Write to bad address of SDMR: 0x%.8x\n", addr);
-		return;
-	}
+	if (addr != 0xFFFFE880)
+		return panic("Write to bad address of SDMR: 0x%.8x\n", addr);
+	return 0;
 }
 
-static uint16_t read_nonsdmr_bsc_reg(uint32_t addr)
+static int read_nonsdmr_bsc_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
 	case BSC_BCR1_OFF:
-		return bsc.BCR1;
-	case BSC_BCR2_OFF:
-		return bsc.BCR2;
-	case BSC_WCR1_OFF:
-		return bsc.WCR1;
-	case BSC_WCR2_OFF:
-		return bsc.WCR2;
-	case BSC_MCR_OFF:
-		return bsc.MCR;
-	case BSC_PCR_OFF:
-		return bsc.PCR;
-	case BSC_RTCSR_OFF:
-		return bsc.RTCSR;
-	case BSC_RTCNT_OFF:
-		return bsc.RTCNT;
-	case BSC_RTCOR_OFF:
-		return bsc.RTCOR;
-	case BSC_RFCR_OFF:
-		return bsc.RFCR;
-	case BSC_MCSCR4_OFF:
-		return bsc.MCSCR[4];
-	default:
-		panic("Attempted read of unsupported BSC register at 0x%.8x\n", addr);
+		*val_p = bsc.BCR1;
 		return 0;
+	case BSC_BCR2_OFF:
+		*val_p = bsc.BCR2;
+		return 0;
+	case BSC_WCR1_OFF:
+		*val_p = bsc.WCR1;
+		return 0;
+	case BSC_WCR2_OFF:
+		*val_p = bsc.WCR2;
+		return 0;
+	case BSC_MCR_OFF:
+		*val_p = bsc.MCR;
+		return 0;
+	case BSC_PCR_OFF:
+		*val_p = bsc.PCR;
+		return 0;
+	case BSC_RTCSR_OFF:
+		*val_p = bsc.RTCSR;
+		return 0;
+	case BSC_RTCNT_OFF:
+		*val_p = bsc.RTCNT;
+		return 0;
+	case BSC_RTCOR_OFF:
+		*val_p = bsc.RTCOR;
+		return 0;
+	case BSC_RFCR_OFF:
+		*val_p = bsc.RFCR;
+		return 0;
+	case BSC_MCSCR4_OFF:
+		*val_p = bsc.MCSCR[4];
+		return 0;
+	default:
+		return panic("Attempted read of unsupported BSC register at 0x%.8x\n", addr);
 	}
 }
 
@@ -4963,269 +4982,250 @@ static bool is_except_longword_address(uint32_t addr)
 	}
 }
 
-static uint32_t except_read_longword_reg(uint32_t addr)
+static int except_read_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
 	case EXCEPT_TRA_OFF:
-		return cpu.TRA;
-	case EXCEPT_EXPEVT_OFF:
-		return cpu.EXPEVT;
-	case EXCEPT_INTEVT_OFF:
-		return cpu.INTEVT;
-	case EXCEPT_INTEVT2_OFF:
-		return cpu.INTEVT2;
-	default:
-		panic("Attempted read of unsupported exception register at 0x%.8x\n", addr);
+		*val_p = cpu.TRA;
 		return 0;
+	case EXCEPT_EXPEVT_OFF:
+		*val_p = cpu.EXPEVT;
+		return 0;
+	case EXCEPT_INTEVT_OFF:
+		*val_p = cpu.INTEVT;
+		return 0;
+	case EXCEPT_INTEVT2_OFF:
+		*val_p = cpu.INTEVT2;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported exception register at 0x%.8x\n", addr);
 	}
 }
 
-static uint8_t read_byte(uint32_t addr)
+static int read_byte(uint32_t addr, uint8_t *val_p)
 {
-	DEBUG_PRINT("Reading byte from 0x%.8x\n", addr);
+	uint32_t pa;
+
+	DEBUG_PRINT("Reading byte from 0x%.8x\n", va);
 	addr = mock_va_translation(addr);
-	addr = mmu_virt_to_phys(addr);
+	if (mmu_virt_to_phys(addr, &pa))
+		return 1;
+	addr = pa;
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
 	case BOOTLOADER_OFF:
-		return *(uint8_t *)(firmware + (addr & FIRMWARE_MASK));
+		*val_p = *(uint8_t *)(firmware + (addr & FIRMWARE_MASK));
+		return 0;
 	case 0x0B000000:
 		if (is_usb_byte_address(addr))
-			return usb_read_byte_reg(addr);
+			return usb_read_byte_reg(addr, val_p);
 		break;
 	case MEMORY_OFF:
 	case MEMORY_SHADOW:
-		return *(uint8_t *)(memory + (addr & MEMORY_MASK));
+		*val_p = *(uint8_t *)(memory + (addr & MEMORY_MASK));
+		return 0;
 	case DISPLAY_OFF:
 		if (is_display_regs_byte_address(addr))
-			return display_read_byte_reg(addr);
-		return display.fb[addr - DISPLAY_FB_OFF];
+			return display_read_byte_reg(addr, val_p);
+		*val_p = display.fb[addr - DISPLAY_FB_OFF];
+		return 0;
 	case 0x13000000:
-		return xB3A_read_byte_reg(addr);
+		return xB3A_read_byte_reg(addr, val_p);
 	case 0x18000000:
 	case 0x1A000000:
 		if (is_compactflash_cis_byte_address(addr))
-			return compactflash_cis_read_byte_reg(addr);
+			return compactflash_cis_read_byte_reg(addr, val_p);
 		if (is_cfcard_ata_byte_address(addr))
-			return cfcard_ata_read_byte_reg(addr);
-		break;
-	case 0xFF000000:
-	case 0x04000000:
-		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE) {
-			panic("Bad width (8) for read from PFC\n");
-			return 0;
-		}
-		if (is_ioports_byte_address(addr))
-			return ioports_read_byte_reg(addr);
-		if (is_intc_byte_address(addr))
-			return intc_read_byte_reg(addr);
-		if (is_rtc_address(addr))
-			return read_rtc_reg(addr);
-		if (is_pdm_address(addr))
-			return read_pdm_reg(addr);
-		if (is_ubc_longword_address(addr)) {
-			panic("Bad width (8) for read from UBC longword\n");
-			return 0;
-		}
-		if (is_tmu_byte_address(addr))
-			return read_tmu_byte_reg(addr);
-		if (is_tmu_word_address(addr)) {
-			panic("Bad width (8) for read from TMU word\n");
-			return 0;
-		}
-		if (is_tmu_longword_address(addr)) {
-			panic("Bad width (8) for read from TMU longword\n");
-			return 0;
-		}
-		if (addr >= BSC_REGS_OFF && addr < BSC_REGS_OFF + BSC_REGS_SIZE) {
-			panic("Bad width (8) for read from BSC\n");
-			return 0;
-		}
-		if (is_scif_byte_address(addr))
-			return read_scif_byte_reg(addr);
-		if (is_scif_word_address(addr)) {
-			panic("Bad width (8) for read from SCIF word\n");
-			return 0;
-		}
-		if (is_adconv_byte_address(addr))
-			return adconv_read_byte_reg(addr);
-		if (is_daconv_byte_address(addr))
-			return daconv_read_byte_reg(addr);
-		break;
-	}
-	panic("Attempted read of unknown address 0x%.8x\n", addr);
-	return 0;
-}
-
-static uint16_t read_word(uint32_t addr)
-{
-	DEBUG_PRINT("Reading word from 0x%.8x\n", addr);
-
-	if (addr & 1) {
-		panic("Unaligned word read from 0x%.8x\n", addr);
-		return 0;
-	}
-
-	addr = mock_va_translation(addr);
-	addr = mmu_virt_to_phys(addr);
-	addr = p1_p2_to_phys(addr);
-
-	switch (addr & 0xFF000000) {
-	case FIRMWARE_OFF:
-	case BOOTLOADER_OFF:
-		return *(uint16_t *)(firmware + (addr & FIRMWARE_MASK));
-	case MEMORY_OFF:
-	case MEMORY_SHADOW:
-		return *(uint16_t *)(memory + (addr & MEMORY_MASK));
-	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
-			panic("Unsupported display register 0x%.8x\n", addr);
-			return 0;
-		}
-		return *(uint16_t *)(display.fb + (addr - DISPLAY_FB_OFF));
-	case MBOARD_REGS_OFF:
-		if (!is_motherboard_word_address(addr)) {
-			panic("Unsupported motherboard register 0x%.8x\n", addr);
-			return 0;
-		}
-		return motherboard_read_word_reg(addr);
-	case 0x18000000:
-	case 0x1A000000:
-		if (is_cfcard_ata_word_address(addr))
-			return cfcard_ata_read_word_reg(addr);
+			return cfcard_ata_read_byte_reg(addr, val_p);
 		break;
 	case 0xFF000000:
 	case 0x04000000:
 		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE)
-			/* TODO: use a wrapper function too because reads must be aligned */
-			return *(uint16_t *)(pfc_regs + (addr - PFC_REGS_OFF));
-		if (is_intc_word_address(addr))
-			return intc_read_word_reg(addr);
-		if (is_rtc_address(addr)) {
-			panic("Bad width (16) for read from RTC\n");
-			return 0;
-		}
-		if (is_pdm_address(addr)) {
-			panic("Bad width (16) for read from power-down mode register\n");
-			return 0;
-		}
-		if (is_ubc_longword_address(addr)) {
-			panic("Bad width (16) for read from UBC longword\n");
-			return 0;
-		}
-		if (is_tmu_byte_address(addr)) {
-			panic("Bad width (16) for read from TMU byte\n");
-			return 0;
-		}
+			return panic("Bad width (8) for read from PFC\n");
+		if (is_ioports_byte_address(addr))
+			return ioports_read_byte_reg(addr, val_p);
+		if (is_intc_byte_address(addr))
+			return intc_read_byte_reg(addr, val_p);
+		if (is_rtc_address(addr))
+			return read_rtc_reg(addr, val_p);
+		if (is_pdm_address(addr))
+			return read_pdm_reg(addr, val_p);
+		if (is_ubc_longword_address(addr))
+			return panic("Bad width (8) for read from UBC longword\n");
+		if (is_tmu_byte_address(addr))
+			return read_tmu_byte_reg(addr, val_p);
 		if (is_tmu_word_address(addr))
-			return read_tmu_word_reg(addr);
-		if (is_tmu_longword_address(addr)) {
-			panic("Bad width (16) for read from TMU longword\n");
-			return 0;
-		}
+			return panic("Bad width (8) for read from TMU word\n");
+		if (is_tmu_longword_address(addr))
+			return panic("Bad width (8) for read from TMU longword\n");
 		if (addr >= BSC_REGS_OFF && addr < BSC_REGS_OFF + BSC_REGS_SIZE)
-			return read_nonsdmr_bsc_reg(addr);
-		if (is_scif_byte_address(addr)) {
-			panic("Bad width (16) for read from SCIF byte\n");
-			return 0;
-		}
+			return panic("Bad width (8) for read from BSC\n");
+		if (is_scif_byte_address(addr))
+			return read_scif_byte_reg(addr, val_p);
 		if (is_scif_word_address(addr))
-			return read_scif_word_reg(addr);
-		if (is_cpg_word_address(addr))
-			return cpg_read_word_reg(addr);
+			return panic("Bad width (8) for read from SCIF word\n");
+		if (is_adconv_byte_address(addr))
+			return adconv_read_byte_reg(addr, val_p);
+		if (is_daconv_byte_address(addr))
+			return daconv_read_byte_reg(addr, val_p);
 		break;
 	}
-	panic("Attempted read of unknown address 0x%.8x\n", addr);
-	return 0;
+	return panic("Attempted read of unknown address 0x%.8x\n", addr);
 }
 
-static uint32_t read_longword(uint32_t addr)
+static int read_word(uint32_t addr, uint16_t *val_p)
 {
-	DEBUG_PRINT("Reading longword from 0x%.8x\n", addr);
+	uint32_t pa;
 
-	if (addr & 3) {
-		panic("Unaligned longword read from 0x%.8x\n", addr);
-		return 0;
-	}
+	DEBUG_PRINT("Reading word from 0x%.8x\n", addr);
 
+	if (addr & 1)
+		return panic("Unaligned word read from 0x%.8x\n", addr);
 	addr = mock_va_translation(addr);
-	addr = mmu_virt_to_phys(addr);
+	if (mmu_virt_to_phys(addr, &pa))
+		return 1;
+	addr = pa;
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
 	case BOOTLOADER_OFF:
-		return *(uint32_t *)(firmware + (addr & FIRMWARE_MASK));
+		*val_p = *(uint16_t *)(firmware + (addr & FIRMWARE_MASK));
+		return 0;
 	case MEMORY_OFF:
 	case MEMORY_SHADOW:
-		return *(uint32_t *)(memory + (addr & MEMORY_MASK));
+		*val_p = *(uint16_t *)(memory + (addr & MEMORY_MASK));
+		return 0;
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
-			panic("Unsupported display register 0x%.8x\n", addr);
-			return 0;
-		}
-		return *(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF));
+		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+			return panic("Unsupported display register 0x%.8x\n", addr);
+		*val_p = *(uint16_t *)(display.fb + (addr - DISPLAY_FB_OFF));
+		return 0;
+	case MBOARD_REGS_OFF:
+		if (!is_motherboard_word_address(addr))
+			return panic("Unsupported motherboard register 0x%.8x\n", addr);
+		return motherboard_read_word_reg(addr, val_p);
+	case 0x18000000:
+	case 0x1A000000:
+		if (is_cfcard_ata_word_address(addr))
+			return cfcard_ata_read_word_reg(addr, val_p);
+		break;
 	case 0xFF000000:
 	case 0x04000000:
 		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE) {
-			panic("Bad width (32) for read from PFC\n");
+			/* TODO: use a wrapper function too because reads must be aligned */
+			*val_p = *(uint16_t *)(pfc_regs + (addr - PFC_REGS_OFF));
 			return 0;
 		}
-		if (is_rtc_address(addr)) {
-			panic("Bad width (32) for read from RTC\n");
-			return 0;
-		}
-		if (is_pdm_address(addr)) {
-			panic("Bad width (32) for read from power-down mode register\n");
-			return 0;
-		}
+		if (is_intc_word_address(addr))
+			return intc_read_word_reg(addr, val_p);
+		if (is_rtc_address(addr))
+			return panic("Bad width (16) for read from RTC\n");
+		if (is_pdm_address(addr))
+			return panic("Bad width (16) for read from power-down mode register\n");
 		if (is_ubc_longword_address(addr))
-			return read_ubc_longword_reg(addr);
-		if (is_tmu_byte_address(addr)) {
-			panic("Bad width (32) for read from TMU byte\n");
-			return 0;
-		}
-		if (is_tmu_word_address(addr)) {
-			panic("Bad width (32) for read from TMU word\n");
-			return 0;
-		}
+			return panic("Bad width (16) for read from UBC longword\n");
+		if (is_tmu_byte_address(addr))
+			return panic("Bad width (16) for read from TMU byte\n");
+		if (is_tmu_word_address(addr))
+			return read_tmu_word_reg(addr, val_p);
 		if (is_tmu_longword_address(addr))
-			return read_tmu_longword_reg(addr);
+			return panic("Bad width (16) for read from TMU longword\n");
+		if (addr >= BSC_REGS_OFF && addr < BSC_REGS_OFF + BSC_REGS_SIZE)
+			return read_nonsdmr_bsc_reg(addr, val_p);
+		if (is_scif_byte_address(addr))
+			return panic("Bad width (16) for read from SCIF byte\n");
+		if (is_scif_word_address(addr))
+			return read_scif_word_reg(addr, val_p);
+		if (is_cpg_word_address(addr))
+			return cpg_read_word_reg(addr, val_p);
+		break;
+	}
+	return panic("Attempted read of unknown address 0x%.8x\n", addr);
+}
+
+static int read_longword(uint32_t addr, uint32_t *val_p)
+{
+	uint32_t pa;
+
+	DEBUG_PRINT("Reading longword from 0x%.8x\n", addr);
+
+	if (addr & 3)
+		return panic("Unaligned longword read from 0x%.8x\n", addr);
+	addr = mock_va_translation(addr);
+	if (mmu_virt_to_phys(addr, &pa))
+		return 1;
+	addr = pa;
+	addr = p1_p2_to_phys(addr);
+
+	switch (addr & 0xFF000000) {
+	case FIRMWARE_OFF:
+	case BOOTLOADER_OFF:
+		*val_p = *(uint32_t *)(firmware + (addr & FIRMWARE_MASK));
+		return 0;
+	case MEMORY_OFF:
+	case MEMORY_SHADOW:
+		*val_p = *(uint32_t *)(memory + (addr & MEMORY_MASK));
+		return 0;
+	case DISPLAY_OFF:
+		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+			return panic("Unsupported display register 0x%.8x\n", addr);
+		*val_p = *(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF));
+		return 0;
+	case 0xFF000000:
+	case 0x04000000:
+		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE)
+			return panic("Bad width (32) for read from PFC\n");
+		if (is_rtc_address(addr))
+			return panic("Bad width (32) for read from RTC\n");
+		if (is_pdm_address(addr))
+			return panic("Bad width (32) for read from power-down mode register\n");
+		if (is_ubc_longword_address(addr))
+			return read_ubc_longword_reg(addr, val_p);
+		if (is_tmu_byte_address(addr))
+			return panic("Bad width (32) for read from TMU byte\n");
+		if (is_tmu_word_address(addr))
+			return panic("Bad width (32) for read from TMU word\n");
+		if (is_tmu_longword_address(addr))
+			return read_tmu_longword_reg(addr, val_p);
 		if (addr >= BSC_REGS_OFF && addr < BSC_REGS_OFF + BSC_REGS_SIZE) {
 			/*
 			 * I've actually seen this in the firmware during boot so I have no
 			 * choice but to allow it. TODO: test this on the Jornada.
 			 */
 			notice("Bad width (32) for read from BSC at address 0x%.8x\n", addr);
+			*val_p = 0;
 			return 0;
 		}
 		if (is_except_longword_address(addr))
-			return except_read_longword_reg(addr);
+			return except_read_longword_reg(addr, val_p);
 		if (is_dmac_longword_address(addr))
-			return dmac_read_longword_reg(addr);
+			return dmac_read_longword_reg(addr, val_p);
 		if (is_mmu_longword_address(addr))
-			return mmu_read_longword_reg(addr);
+			return mmu_read_longword_reg(addr, val_p);
 		if (is_cache_longword_address(addr))
-			return cache_read_longword_reg(addr);
+			return cache_read_longword_reg(addr, val_p);
 	}
-	panic("Attempted read of unknown address 0x%.8x\n", addr);
-	return 0;
+	return panic("Attempted read of unknown address 0x%.8x\n", addr);
 }
 
-static void write_byte(uint32_t addr, uint8_t val)
+static int write_byte(uint32_t addr, uint8_t val)
 {
+	uint32_t pa;
+
 	DEBUG_PRINT("Writing byte 0x%.2x to 0x%.8x\n", val, addr);
 	addr = mock_va_translation(addr);
-	addr = mmu_virt_to_phys(addr);
+	if (mmu_virt_to_phys(addr, &pa))
+		return 1;
+	addr = pa;
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
 	case BOOTLOADER_OFF:
-		panic("Attempted write to firmware address! (0x%.8x)\n", addr);
-		return;
+		return panic("Attempted write to firmware address! (0x%.8x)\n", addr);
 	case 0x0B000000:
 		if (is_usb_byte_address(addr))
 			return usb_write_byte_reg(addr, val);
@@ -5237,12 +5237,12 @@ static void write_byte(uint32_t addr, uint8_t val)
 			printf("Too low memory address 0x%.8x\n", addr);
 #endif
 		*(uint8_t *)(memory + (addr & MEMORY_MASK)) = val;
-		return;
+		return 0;
 	case DISPLAY_OFF:
 		if (is_display_regs_byte_address(addr))
 			return display_write_byte_reg(addr, val);
 		display.fb[addr - DISPLAY_FB_OFF] = val;
-		return;
+		return 0;
 	case 0x13000000:
 		return xB3A_write_byte_reg(addr, val);
 	case 0x18000000:
@@ -5261,8 +5261,7 @@ static void write_byte(uint32_t addr, uint8_t val)
 		if (is_rtc_address(addr))
 			return write_rtc_reg(addr, val);
 		if (addr >= BSC_REGS_OFF && addr < BSC_REGS_OFF + BSC_REGS_SIZE) {
-			panic("Bad width (8) for write to BSC\n");
-			return;
+			return panic("Bad width (8) for write to BSC\n");
 #if 0
 			printf("writing byte 0x%x to addr 0x%x\n", val, addr);
 			*(uint8_t *)(bsc_regs + (addr - BSC_REGS_OFF)) = val;
@@ -5271,26 +5270,20 @@ static void write_byte(uint32_t addr, uint8_t val)
 		}
 		if (addr >= BSC_SDMR_OFF && addr < BSC_SDMR_OFF + BSC_SDMR_SIZE)
 			return write_sdmr_bsc_reg(addr, val);
-		if (addr >= WDT_REGS_OFF && addr < WDT_REGS_END) {
-			panic("Bad width (8) for write to WDT\n");
-			return;
-		}
+		if (addr >= WDT_REGS_OFF && addr < WDT_REGS_END)
+			return panic("Bad width (8) for write to WDT\n");
 		if (is_tmu_byte_address(addr))
 			return tmu_write_byte_reg(addr, val);
 		if (addr == STBCR_OFF) {
 			stbcr_reg = val;
-			return;
+			return 0;
 		}
-		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE) {
-			panic("Bad width (8) for write to PFC\n");
-			return;
-		}
+		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE)
+			return panic("Bad width (8) for write to PFC\n");
 		if (is_scif_byte_address(addr))
 			return write_scif_byte_reg(addr, val);
-		if (is_scif_word_address(addr)) {
-			panic("Bad width (8) for write to SCIF word\n");
-			return;
-		}
+		if (is_scif_word_address(addr))
+			return panic("Bad width (8) for write to SCIF word\n");
 		if (is_adconv_byte_address(addr))
 			return adconv_write_byte_reg(addr, val);
 		if (is_daconv_byte_address(addr))
@@ -5299,25 +5292,28 @@ static void write_byte(uint32_t addr, uint8_t val)
 			return pdm_write_byte_reg(addr, val);
 		break;
 	}
-	panic("Attempted write to unknown address 0x%.8x (value: 0x%.2x)\n", addr, val);
+	return panic("Attempted write to unknown address 0x%.8x (value: 0x%.2x)\n", addr, val);
 }
 
-static void write_word(uint32_t addr, uint16_t val)
+static int write_word(uint32_t addr, uint16_t val)
 {
+	uint32_t pa;
+
 	DEBUG_PRINT("Writing word 0x%.4x to 0x%.8x\n", val, addr);
 
 	if (addr & 1)
 		return panic("Unaligned word write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
-	addr = mmu_virt_to_phys(addr);
+	if (mmu_virt_to_phys(addr, &pa))
+		return 1;
+	addr = pa;
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
 	case BOOTLOADER_OFF:
-		panic("Attempted write to firmware address! (0x%.8x)\n", addr);
-		return;
+		return panic("Attempted write to firmware address! (0x%.8x)\n", addr);
 	case MEMORY_OFF:
 	case MEMORY_SHADOW:
 #if 0
@@ -5325,19 +5321,15 @@ static void write_word(uint32_t addr, uint16_t val)
 			printf("Too low memory address 0x%.8x\n", addr);
 #endif
 		*(uint16_t *)(memory + (addr & MEMORY_MASK)) = val;
-		return;
+		return 0;
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
-			panic("Unsupported display register 0x%.8x\n", addr);
-			return;
-		}
+		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+			return panic("Unsupported display register 0x%.8x\n", addr);
 		*(uint16_t *)(display.fb + (addr - DISPLAY_FB_OFF)) = val;
-		return;
+		return 0;
 	case MBOARD_REGS_OFF:
-		if (!is_motherboard_word_address(addr)) {
-			panic("Unsupported motherboard register 0x%.8x\n", addr);
-			return;
-		}
+		if (!is_motherboard_word_address(addr))
+			return panic("Unsupported motherboard register 0x%.8x\n", addr);
 		return motherboard_write_word_reg(addr, val);
 	case 0x13000000:
 		return xB3A_write_word_reg(addr, val);
@@ -5359,32 +5351,26 @@ static void write_word(uint32_t addr, uint16_t val)
 			 */
 			return intc_write_byte_reg(addr, val);
 		}
-		if (is_rtc_address(addr)) {
-			panic("Bad width (16) for write to RTC\n");
-			return;
-		}
+		if (is_rtc_address(addr))
+			return panic("Bad width (16) for write to RTC\n");
 		if (addr >= BSC_REGS_OFF && addr < BSC_REGS_OFF + BSC_REGS_SIZE)
 			return write_nonsdmr_bsc_reg(addr, val);
-		if (addr >= BSC_SDMR_OFF && addr < BSC_SDMR_OFF + BSC_SDMR_SIZE) {
-			panic("Bad width (16) for write to SDMR\n");
-			return;
-		}
+		if (addr >= BSC_SDMR_OFF && addr < BSC_SDMR_OFF + BSC_SDMR_SIZE)
+			return panic("Bad width (16) for write to SDMR\n");
 		if (addr >= WDT_REGS_OFF && addr < WDT_REGS_END) {
 			/* TODO: check that the upper byte is as expected for addr */
 			if ((val & 0xFF00) != 0x5A00 && (val & 0xFF00) != 0xA500)
-				panic("Bad upper byte for write to WDT\n");
+				return panic("Bad upper byte for write to WDT\n");
 			*(uint16_t *)(wdt_regs + (addr - WDT_REGS_OFF)) = val;
-			return;
+			return 0;
 		}
 		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE) {
 			return pfc_write_word_reg(addr, val);
 		}
 		if (is_tmu_word_address(addr))
 			return tmu_write_word_reg(addr, val);
-		if (is_scif_byte_address(addr)) {
-			panic("Bad width (16) for write to SCIF byte\n");
-			return;
-		}
+		if (is_scif_byte_address(addr))
+			return panic("Bad width (16) for write to SCIF byte\n");
 		if (is_scif_word_address(addr))
 			return write_scif_word_reg(addr, val);
 		if (is_dmac_word_address(addr))
@@ -5393,25 +5379,28 @@ static void write_word(uint32_t addr, uint16_t val)
 			return cpg_write_word_reg(addr, val);
 		break;
 	}
-	panic("Attempted write to unknown address 0x%.8x (value: 0x%.4x)\n", addr, val);
+	return panic("Attempted write to unknown address 0x%.8x (value: 0x%.4x)\n", addr, val);
 }
 
-static void write_longword(uint32_t addr, uint32_t val)
+static int write_longword(uint32_t addr, uint32_t val)
 {
+	uint32_t pa;
+
 	DEBUG_PRINT("Writing longword 0x%.8x to 0x%.8x\n", val, addr);
 
 	if (addr & 3)
 		return panic("Unaligned longword write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
-	addr = mmu_virt_to_phys(addr);
+	if (mmu_virt_to_phys(addr, &pa))
+		return 1;
+	addr = pa;
 	addr = p1_p2_to_phys(addr);
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
 	case BOOTLOADER_OFF:
-		panic("Attempted write to firmware address! (0x%.8x)\n", addr);
-		return;
+		return panic("Attempted write to firmware address! (0x%.8x)\n", addr);
 	case MEMORY_OFF:
 	case MEMORY_SHADOW:
 #if 0
@@ -5420,42 +5409,31 @@ static void write_longword(uint32_t addr, uint32_t val)
 			printf("Too low memory address 0x%.8x\n", addr);
 #endif
 		*(uint32_t *)(memory + (addr & MEMORY_MASK)) = val;
-		return;
+		return 0;
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
-			panic("Unsupported display register 0x%.8x\n", addr);
-			return;
-		}
+		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+			return panic("Unsupported display register 0x%.8x\n", addr);
 		*(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF)) = val;
-		return;
+		return 0;
 	case 0xFF000000:
 	case 0xF0000000:
 	case 0x04000000:
-		if (is_rtc_address(addr)) {
-			panic("Bad width (32) for write to RTC\n");
-			return;
-		}
+		if (is_rtc_address(addr))
+			return panic("Bad width (32) for write to RTC\n");
 		if (addr >= BSC_REGS_OFF && addr < BSC_REGS_OFF + BSC_REGS_SIZE) {
-			panic("Bad width (32) for write to BSC\n");
-			return;
+			return panic("Bad width (32) for write to BSC\n");
 #if 0
 			printf("writing longword 0x%x to addr 0x%x\n", val, addr);
 			*(uint32_t *)(bsc_regs + (addr - BSC_REGS_OFF)) = val;
 			return;
 #endif
 		}
-		if (addr >= BSC_SDMR_OFF && addr < BSC_SDMR_OFF + BSC_SDMR_SIZE) {
-			panic("Bad width (32) for write to SDMR\n");
-			return;
-		}
-		if (addr >= WDT_REGS_OFF && addr < WDT_REGS_END) {
-			panic("Bad width (32) for write to WDT\n");
-			return;
-		}
-		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE) {
-			panic("Bad width (32) for write to PFC\n");
-			return;
-		}
+		if (addr >= BSC_SDMR_OFF && addr < BSC_SDMR_OFF + BSC_SDMR_SIZE)
+			return panic("Bad width (32) for write to SDMR\n");
+		if (addr >= WDT_REGS_OFF && addr < WDT_REGS_END)
+			return panic("Bad width (32) for write to WDT\n");
+		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE)
+			return panic("Bad width (32) for write to PFC\n");
 		if (is_tmu_longword_address(addr))
 			return tmu_write_longword_reg(addr, val);
 		if (is_dmac_longword_address(addr))
@@ -5466,7 +5444,7 @@ static void write_longword(uint32_t addr, uint32_t val)
 			return mmu_write_longword_reg(addr, val);
 		break;
 	}
-	panic("Attempted write to unknown address 0x%.8x (value: 0x%.8x)\n", addr, val);
+	return panic("Attempted write to unknown address 0x%.8x (value: 0x%.8x)\n", addr, val);
 }
 
 static void print_longword_reg(const char *name, uint32_t val)
@@ -5733,13 +5711,17 @@ static void dump_cpu(void)
 
 static void dump_micro(void)
 {
+	uint16_t insn;
 	int i;
 
 	dump_cpu();
 
 	printf("CODE:");
-	for (i = 0; i < 12; ++i)
-		printf(" %.4x", read_word((cpu.PC - 4) + (i << 1)));
+	for (i = 0; i < 12; ++i) {
+		if (read_word((cpu.PC - 4) + (i << 1), &insn))
+			return;
+		printf(" %.4x", insn);
+	}
 	printf("\n");
 
 	dump_intc();
@@ -6029,7 +6011,7 @@ static int execute(uint32_t pc);
 #define INSN_MOV_I8_RN				0xE000
 
 /* sh-3 has delayed branch instructions */
-static void prepare_delayed_slot(uint32_t target)
+static int prepare_delayed_slot(uint32_t target)
 {
 	if (cpu.extra_state & EXTRA_IN_DELAYED)
 		return panic("Branch after delayed branch!\n");
@@ -6039,6 +6021,7 @@ static void prepare_delayed_slot(uint32_t target)
 
 	/* Delayed slots use the target for any pc relative addressing */
 	cpu.PC = target;
+	return 0;
 }
 
 /* Instructions of the form 0000 xxxx xxxx xxxx */
@@ -6054,19 +6037,17 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_0_RTS:
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
-			panic("Invalid delay slot! (TODO)\n");
+			return panic("Invalid delay slot! (TODO)\n");
 		backtrace_pop();
-		prepare_delayed_slot(cpu.PR + 4);
-		return 0;
+		return prepare_delayed_slot(cpu.PR + 4);
 	case INSN_0_RTE:
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
-			panic("Invalid delay slot! (TODO)\n");
+			return panic("Invalid delay slot! (TODO)\n");
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		backtrace_pop();
 		cpu.SR = cpu.SSR;
-		prepare_delayed_slot(cpu.SPC);
-		return 0;
+		return prepare_delayed_slot(cpu.SPC);
 	case INSN_0_DIV0U:
 		cpu.SR &= ~(SR_T_BIT | SR_Q_BIT | SR_M_BIT);
 		cpu.PC += 2;
@@ -6082,13 +6063,12 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 		 */
 		return 0;
 	case INSN_0_LDTLB:
-		mmu_load_pte_to_tlb();
+		if (mmu_load_pte_to_tlb())
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	}
-
-	panic("0 format instruction 0x%x not implemented\n", insn);
-	return 1;
+	return panic("0 format instruction 0x%x not implemented\n", insn);
 }
 
 /* Instructions of the form xxxx nnnn dddd dddd */
@@ -6096,23 +6076,27 @@ static int execute_nd8_format(uint32_t pc, uint16_t insn)
 {
 	uint8_t d = (insn & 0x00FFU);
 	uint8_t n = (insn & 0x0F00U) >> 8;
+	uint16_t data16;
+	uint32_t data32;
 
 	switch (insn & 0xF000) {
 	case INSN_ND8_MOV_W:
-		write_gp_register(n, sign_extend_word(read_word(pc + (d << 1))));
+		if (read_word(pc + (d << 1), &data16))
+			return 1;
+		write_gp_register(n, sign_extend_word(data16));
 		cpu.PC += 2;
 		return 0;
 	case INSN_ND8_MOV_L:
 		pc &= 0xFFFFFFFC; /* Aligned longword read */
-		write_gp_register(n, read_longword(pc + (d << 2)));
+		if (read_longword(pc + (d << 2), &data32))
+			return 1;
+		write_gp_register(n, data32);
 		cpu.PC += 2;
 		return 0;
 	default:
 		break;
 	}
-
-	panic("ND8 format instruction 0x%x not implemented\n", insn);
-	return 1;
+	return panic("ND8 format instruction 0x%x not implemented\n", insn);
 }
 
 /* Instructions of the form xxxx nnnn iiii iiii */
@@ -6133,9 +6117,7 @@ static int execute_ni8_format(uint32_t pc, uint16_t insn)
 	default:
 		break;
 	}
-
-	panic("NI8 format instruction 0x%x not implemented\n", insn);
-	return 1;
+	return panic("NI8 format instruction 0x%x not implemented\n", insn);
 }
 
 /* Instructions of the form xxxx nnnn xxxx xxxx */
@@ -6148,13 +6130,13 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 	switch (insn & 0xF0FF) {
 	case INSN_N_STC_SR_RN:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		write_gp_register(n, cpu.SR);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STCVBR:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		write_gp_register(n, cpu.VBR);
 		cpu.PC += 2;
 		return 0;
@@ -6194,56 +6176,63 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_N_STSMMACH:
 		nval = read_gp_register(n) - 4;
-		write_gp_register(n, nval);
 		/*
 		 * The manual seems to do sign extension here, but I think MACH will
 		 * always be in the correct format? TODO: confirm this.
 		 */
-		write_longword(nval, cpu.MACH);
+		if (write_longword(nval, cpu.MACH))
+			return 1;
+		write_gp_register(n, nval);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STSMMACL:
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, cpu.MACL))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, cpu.MACL);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STCMSR:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, cpu.SR))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, cpu.SR);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STCMGBR:
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, cpu.GBR))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, cpu.GBR);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STCMVBR:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, cpu.VBR))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, cpu.VBR);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STCMSSR:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, cpu.SSR))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, cpu.SSR);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STCMSPC:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, cpu.SPC))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, cpu.SPC);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_SHLL2:
@@ -6300,8 +6289,9 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_N_STSL_PR_AT_MINUS_RN:
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, cpu.PR))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, cpu.PR);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_ROTR:
@@ -6346,9 +6336,7 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 	default:
 		break;
 	}
-
-	panic("N format instruction 0x%x not implemented\n", insn);
-	return 1;
+	return panic("N format instruction 0x%x not implemented\n", insn);
 }
 
 /* Instructions of the form xxxx mmmm xxxx xxxx */
@@ -6358,19 +6346,18 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 	uint32_t mval;
 	int32_t target;
 	uint8_t bankreg;
+	uint32_t data32;
 
 	switch (insn & 0xF0FF) {
 	case INSN_M_BRAF_RM:
 		/* The manual seems to be missing the "+4" here */
 		target = cpu.PC + read_gp_register(m) + 4;
-		prepare_delayed_slot(target);
-		return 0;
+		return prepare_delayed_slot(target);
 	case INSN_M_JSR_AT_RM:
 		target = read_gp_register(m) + 4;
 		backtrace_push(cpu.PC, target, false /* interrupt */);
 		cpu.PR = cpu.PC;
-		prepare_delayed_slot(target);
-		return 0;
+		return prepare_delayed_slot(target);
 	case INSN_M_LDS_RM_MACH:
 		cpu.MACH = read_gp_register(m);
 		/* Sign extension, I guess. It's copied from the reference */
@@ -6390,21 +6377,23 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_M_LDCVBR:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		cpu.VBR = read_gp_register(m);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDSMPR:
 		mval = read_gp_register(m);
-		cpu.PR = read_longword(mval);
+		if (read_longword(mval, &data32))
+			return 1;
+		cpu.PR = data32;
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDCSR:
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
-			panic("Invalid delay slot! (TODO)\n");
+			return panic("Invalid delay slot! (TODO)\n");
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		/*
 		 * The pseudocode also wants me to unset a few flags, but that doesn't
 		 * make much sense and it quickly leads to trouble with the firmware.
@@ -6414,7 +6403,9 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_M_LDSMMACH:
 		mval = read_gp_register(m);
-		cpu.MACH = read_longword(mval);
+		if (read_longword(mval, &data32))
+			return 1;
+		cpu.MACH = data32;
 		/* TODO: move this to a common function for every time MACH gets set */
 		if ((cpu.MACH & 0x00000200) == 0)
 			cpu.MACH &= 0x000003FF;
@@ -6425,53 +6416,64 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_M_LDCMSR:
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
-			panic("Invalid delay slot! (TODO)\n");
+			return panic("Invalid delay slot! (TODO)\n");
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		mval = read_gp_register(m);
+		if (read_longword(mval, &data32))
+			return 1;
 		/* Same as LDCSR, the manual's pseudocode looks wrong to me */
-		cpu.SR = read_longword(mval) & SR_BIT_MASK;
+		cpu.SR = data32 & SR_BIT_MASK;
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDSMMACL:
 		mval = read_gp_register(m);
-		cpu.MACL = read_longword(mval);
+		if (read_longword(mval, &data32))
+			return 1;
+		cpu.MACL = data32;
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDCMGBR:
 		mval = read_gp_register(m);
-		cpu.GBR = read_longword(mval);
+		if (read_longword(mval, &data32))
+			return 1;
+		cpu.GBR = data32;
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_JMP:
 		target = read_gp_register(m) + 4;
-		prepare_delayed_slot(target);
-		return 0;
+		return prepare_delayed_slot(target);
 	case INSN_M_LDCMVBR:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		mval = read_gp_register(m);
-		cpu.VBR = read_longword(mval);
+		if (read_longword(mval, &data32))
+			return 1;
+		cpu.VBR = data32;
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDCMSSR:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		mval = read_gp_register(m);
+		if (read_longword(mval, &data32))
+			return 1;
 		/* According to the manual's pseudocode, some flags get unset... */
-		cpu.SSR = read_longword(mval) & 0x700003F3;
+		cpu.SSR = data32 & 0x700003F3;
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDCMSPC:
 		if (!(cpu.SR & SR_MD_BIT))
-			panic("Privilege violation! (TODO)\n");
+			return panic("Privilege violation! (TODO)\n");
 		mval = read_gp_register(m);
-		cpu.SPC = read_longword(mval);
+		if (read_longword(mval, &data32))
+			return 1;
+		cpu.SPC = data32;
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
@@ -6484,9 +6486,7 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		}
 		break;
 	}
-
-	panic("M format instruction 0x%x not implemented\n", insn);
-	return 1;
+	return panic("M format instruction 0x%x not implemented\n", insn);
 }
 
 static int execute_nm_format(uint32_t pc, uint16_t insn);
@@ -6514,8 +6514,7 @@ static int execute_xuux_format(uint32_t pc, uint16_t insn)
 	case 0x000D:
 		return execute_nm_format(pc, insn);
 	default:
-		panic("xuux instruction 0x%x not implemented\n", insn);
-		return 1;
+		return panic("xuux instruction 0x%x not implemented\n", insn);
 	}
 }
 
@@ -6612,24 +6611,30 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 	uint32_t nval, mval, src_addr, shift_cnt;
 	bool tbit, qbit, mbit;
 	uint64_t tmp64;
+	uint8_t data8;
+	uint16_t data16;
+	uint32_t data32;
 
 	switch (insn & 0xF00F) {
 	case INSN_NM_MOVBS0:
 		mval = read_gp_register(m);
 		nval = read_gp_register(n);
-		write_byte(read_gp_register(0) + nval, mval);
+		if (write_byte(read_gp_register(0) + nval, mval))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVWS0:
 		mval = read_gp_register(m);
 		nval = read_gp_register(n);
-		write_word(read_gp_register(0) + nval, mval);
+		if (write_word(read_gp_register(0) + nval, mval))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVLS0:
 		mval = read_gp_register(m);
 		nval = read_gp_register(n);
-		write_longword(read_gp_register(0) + nval, mval);
+		if (write_longword(read_gp_register(0) + nval, mval))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MULL:
@@ -6638,18 +6643,24 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_NM_MOVWL0:
 		mval = read_gp_register(m);
-		nval = sign_extend_word(read_word(read_gp_register(0) + mval));
+		if (read_word(read_gp_register(0) + mval, &data16))
+			return 1;
+		nval = sign_extend_word(data16);
 		write_gp_register(n, nval);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVLL0:
 		mval = read_gp_register(m);
-		write_gp_register(n, read_longword(read_gp_register(0) + mval));
+		if (read_longword(read_gp_register(0) + mval, &data32))
+			return 1;
+		write_gp_register(n, data32);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVBL0:
 		src_addr = read_gp_register(0) + read_gp_register(m);
-		write_gp_register(n, sign_extend_byte(read_byte(src_addr)));
+		if (read_byte(src_addr, &data8))
+			return 1;
+		write_gp_register(n, sign_extend_byte(data8));
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_OR_RM_RN:
@@ -6790,31 +6801,38 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVB_ATRM_RN:
-		write_gp_register(n, sign_extend_byte(read_byte(read_gp_register(m))));
+		if (read_byte(read_gp_register(m), &data8))
+			return 1;
+		write_gp_register(n, sign_extend_byte(data8));
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVB_RM_ATRN:
-		write_byte(read_gp_register(n), read_gp_register(m));
+		if (write_byte(read_gp_register(n), read_gp_register(m)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVW_ATRN_RM:
-		write_word(read_gp_register(n), read_gp_register(m));
+		if (write_word(read_gp_register(n), read_gp_register(m)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVL_RM_ATRN:
-		write_longword(read_gp_register(n), read_gp_register(m));
+		if (write_longword(read_gp_register(n), read_gp_register(m)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVBM:
 		nval = read_gp_register(n) - 1;
+		if (write_byte(nval, read_gp_register(m)))
+			return 1;
 		write_gp_register(n, nval);
-		write_byte(nval, read_gp_register(m));
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVL_RM_AT_MINUS_RN:
 		nval = read_gp_register(n) - 4;
+		if (write_longword(nval, read_gp_register(m)))
+			return 1;
 		write_gp_register(n, nval);
-		write_longword(nval, read_gp_register(m));
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_DIV0S:
@@ -6843,7 +6861,9 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_NM_MOVBP:
 		mval = read_gp_register(m);
-		write_gp_register(n, sign_extend_byte(read_byte(mval)));
+		if (read_byte(mval, &data8))
+			return 1;
+		write_gp_register(n, sign_extend_byte(data8));
 		/*
 		 * The pseudocode claims that "+1" only happens when source and target
 		 * registers are not the same, but that doesn't match the behaviour of
@@ -6860,7 +6880,9 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_NM_MOVLP:
 		mval = read_gp_register(m);
-		write_gp_register(n, read_longword(mval));
+		if (read_longword(mval, &data32))
+			return 1;
+		write_gp_register(n, data32);
 		/* See the comment in INSN_NM_MOVBP */
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
@@ -6884,11 +6906,15 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVW_RN_ATRM:
-		write_gp_register(n, sign_extend_word(read_word(read_gp_register(m))));
+		if (read_word(read_gp_register(m), &data16))
+			return 1;
+		write_gp_register(n, sign_extend_word(data16));
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVL_RN_ATRM:
-		write_gp_register(n, read_longword(read_gp_register(m)));
+		if (read_longword(read_gp_register(m), &data32))
+			return 1;
+		write_gp_register(n, data32);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_EXTUB_RM_RN:
@@ -6908,8 +6934,7 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		cpu.PC += 2;
 		return 0;
 	default:
-		panic("nm instruction 0x%x not implemented\n", insn);
-		return 1;
+		return panic("nm instruction 0x%x not implemented\n", insn);
 	}
 }
 
@@ -6922,14 +6947,11 @@ static int execute_d12_format(uint32_t pc, uint16_t insn)
 	switch (insn & 0xF000) {
 	case INSN_BRA:
 		target = cpu.PC + (d << 1) + 4;
-		prepare_delayed_slot(target);
-		return 0;
+		return prepare_delayed_slot(target);
 	default:
 		break;
 	}
-
-	panic("d12 format instruction 0x%x not implemented\n", insn);
-	return 1;
+	return panic("d12 format instruction 0x%x not implemented\n", insn);
 }
 
 /* Instructions of the form xxxx xxxx dddd dddd (or xxxx xxxx iiii iiii) */
@@ -6937,6 +6959,9 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 {
 	uint32_t d, i;
 	int32_t target;
+	uint8_t data8;
+	uint16_t data16;
+	uint32_t data32;
 
 	switch (insn & 0xFF00) {
 	case INSN_I_CMPEQ:
@@ -6972,8 +6997,7 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 			return 0;
 		}
 		target = cpu.PC + (d << 1) + 4;
-		prepare_delayed_slot(target);
-		return 0;
+		return prepare_delayed_slot(target);
 	case INSN_D_BFS:
 		d = sign_extend_lower_8(insn);
 		if (cpu.SR & SR_T_BIT) {
@@ -6981,27 +7005,29 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 			return 0;
 		}
 		target = cpu.PC + (d << 1) + 4;
-		prepare_delayed_slot(target);
-		return 0;
+		return prepare_delayed_slot(target);
 	case INSN_MOVB_R0_TO_AT_DISP_GBR:
 		d = insn & 0x00FFU;
-		write_byte(cpu.GBR + d, read_gp_register(0));
+		if (write_byte(cpu.GBR + d, read_gp_register(0)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_MOVW_R0_TO_AT_DISP_GBR:
 		d = insn & 0x00FFU;
-		write_word(cpu.GBR + (d << 1), read_gp_register(0));
+		if (write_word(cpu.GBR + (d << 1), read_gp_register(0)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_D_MOVLSG:
 		d = insn & 0x00FFU;
-		write_longword(cpu.GBR + (d << 2), read_gp_register(0));
+		if (write_longword(cpu.GBR + (d << 2), read_gp_register(0)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_I_TRAPA:
 		/* TODO: find all instructions that can't be in a delayed slot */
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
-			panic("Invalid delay slot! (TODO)\n");
+			return panic("Invalid delay slot! (TODO)\n");
 		i = insn & 0x00FFU;
 		cpu.TRA = i << 4;
 		cpu.SSR = cpu.SR;
@@ -7049,25 +7075,29 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_I_MOVBLG:
 		d = insn & 0x00FFU;
-		write_gp_register(0, sign_extend_byte(read_byte(cpu.GBR + d)));
+		if (read_byte(cpu.GBR + d, &data8))
+			return 1;
+		write_gp_register(0, sign_extend_byte(data8));
 		cpu.PC += 2;
 		return 0;
 	case INSN_I_MOVWLG:
 		d = insn & 0x00FFU;
-		write_gp_register(0, sign_extend_word(read_word(cpu.GBR + (d << 1))));
+		if (read_word(cpu.GBR + (d << 1), &data16))
+			return 1;
+		write_gp_register(0, sign_extend_word(data16));
 		cpu.PC += 2;
 		return 0;
 	case INSN_I_MOVLLG:
 		d = insn & 0x00FFU;
-		write_gp_register(0, read_longword(cpu.GBR + (d << 2)));
+		if (read_longword(cpu.GBR + (d << 2), &data32))
+			return 1;
+		write_gp_register(0, data32);
 		cpu.PC += 2;
 		return 0;
 	default:
 		break;
 	}
-
-	panic("d format instruction 0x%x not implemented\n", insn);
-	return 1;
+	return panic("d format instruction 0x%x not implemented\n", insn);
 }
 
 /* Instructions of the form xxxx xxxx nnnn dddd, or maybe xxxx xxxx mmmm dddd */
@@ -7076,6 +7106,8 @@ static int execute_nd4_format(uint32_t pc, uint16_t insn)
 	uint32_t d = insn & 0x000FU;
 	uint8_t m, n;
 	uint32_t mval;
+	uint8_t data8;
+	uint16_t data16;
 
 	/*
 	 * Slightly confusing: technically instructions that use the "m" are a
@@ -7086,26 +7118,31 @@ static int execute_nd4_format(uint32_t pc, uint16_t insn)
 
 	switch (insn & 0xFF00) {
 	case INSN_ND4_MOVBS4:
-		write_byte(read_gp_register(n) + d, read_gp_register(0));
+		if (write_byte(read_gp_register(n) + d, read_gp_register(0)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_ND4_MOVW:
-		write_word(read_gp_register(n) + (d << 1), read_gp_register(0));
+		if (write_word(read_gp_register(n) + (d << 1), read_gp_register(0)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	case INSN_ND4_MOVBL4:
 		mval = read_gp_register(m);
-		write_gp_register(0, sign_extend_byte(read_byte(mval + d)));
+		if (read_byte(mval + d, &data8))
+			return 1;
+		write_gp_register(0, sign_extend_byte(data8));
 		cpu.PC += 2;
 		return 0;
 	case INSN_ND4_MOVWL4:
 		mval = read_gp_register(m);
-		write_gp_register(0, sign_extend_word(read_word(mval + (d << 1))));
+		if (read_word(mval + (d << 1), &data16))
+			return 1;
+		write_gp_register(0, sign_extend_word(data16));
 		cpu.PC += 2;
 		return 0;
 	default:
-		panic("nd4 format instruction 0x%x not implemented\n", insn);
-		return 1;
+		return panic("nd4 format instruction 0x%x not implemented\n", insn);
 	}
 }
 
@@ -7120,8 +7157,7 @@ static int execute_xxuu_format(uint32_t pc, uint16_t insn)
 	case 0xC800:
 		return execute_d_format(pc, insn);
 	default:
-		panic("xxuu instruction 0x%x not implemented\n", insn);
-		return 1;
+		return panic("xxuu instruction 0x%x not implemented\n", insn);
 	}
 }
 
@@ -7151,8 +7187,7 @@ static int execute_0uuu_format(uint32_t pc, uint16_t insn)
 	case 0x000E:
 		return execute_nm_format(pc, insn);
 	default:
-		panic("0uuu instruction 0x%x not implemented\n", insn);
-		return 1;
+		return panic("0uuu instruction 0x%x not implemented\n", insn);
 	}
 }
 
@@ -7162,23 +7197,26 @@ static int execute_nmd_format(uint32_t pc, uint16_t insn)
 	uint8_t n = (insn & 0x0F00U) >> 8;
 	uint8_t m = (insn & 0x00F0U) >> 4;
 	uint32_t d = insn & 0x000FU;
+	uint32_t data32;
 
 	switch (insn & 0xF000) {
 	case INSN_MOVL_AT_DISP_RM_TO_RN:
-		write_gp_register(n, read_longword(read_gp_register(m) + (d << 2)));
+		if (read_longword(read_gp_register(m) + (d << 2), &data32))
+			return 1;
+		write_gp_register(n, data32);
 		cpu.PC += 2;
 		return 0;
 	case INSN_MOVL_RM_TO_AT_DISP_RN:
-		write_longword(read_gp_register(n) + (d << 2), read_gp_register(m));
+		if (write_longword(read_gp_register(n) + (d << 2), read_gp_register(m)))
+			return 1;
 		cpu.PC += 2;
 		return 0;
 	default:
-		panic("nmd format instruction 0x%x not implemented\n", insn);
-		return 1;
+		return panic("nmd format instruction 0x%x not implemented\n", insn);
 	}
 }
 
-static uint16_t read_insn(uint32_t pc)
+static int read_insn(uint32_t pc, uint16_t *insn_p)
 {
 	struct patch *p = NULL;
 	int i;
@@ -7188,10 +7226,12 @@ static uint16_t read_insn(uint32_t pc)
 
 	for (i = 0; i < patches.patch_count; ++i) {
 		p = &patches.p[i];
-		if (pc == p->addr)
-			return p->insn;
+		if (pc == p->addr) {
+			*insn_p = p->insn;
+			return 0;
+		}
 	}
-	return read_word(pc);
+	return read_word(pc, insn_p);
 }
 
 /* Execute the instruction at @pc */
@@ -7205,7 +7245,9 @@ static int execute(uint32_t pc)
 		return 1;
 	}
 
-	insn = read_insn(pc);
+	if (read_insn(pc, &insn))
+		return 1;
+
 	switch (insn & 0xF000) {
 	case 0x0000:
 		ret = execute_0uuu_format(pc, insn);
@@ -7258,14 +7300,11 @@ static int execute(uint32_t pc)
 			cpu.PC += 4;
 			ret = 0;
 		} else {
-			panic("DSP instruction encountered outside DSP mode (PC: 0x%.8x)\n", cpu.PC);
-			ret = 1;
+			return panic("DSP instruction encountered outside DSP mode (PC: 0x%.8x)\n", cpu.PC);
 		}
 		break;
 	default:
-		panic("Instruction 0x%x not implemented\n", insn);
-		ret = 1;
-		break;
+		return panic("Instruction 0x%x not implemented\n", insn);
 	}
 
 	return ret;
@@ -7882,7 +7921,9 @@ static void disassemble(uint32_t pc)
 {
 	uint16_t insn;
 
-	insn = read_insn(pc);
+	if (read_insn(pc, &insn))
+		return;
+
 	switch (insn & 0xF000) {
 	case 0x0000:
 		return disassemble_0uuu_format(pc, insn);
@@ -7922,7 +7963,7 @@ static void increment_bsc_rfcr(void)
 		bsc.RFCR = 0;
 		bsc.RTCSR |= RTCSR_OVF;
 		if (bsc.RTCSR & RTCSR_OVIE)
-			panic("Interrupt from OVF not implemented\n");
+			(void)panic("Interrupt from OVF not implemented\n");
 	}
 }
 
@@ -7934,7 +7975,7 @@ static void increment_bsc_rtcnt(void)
 		bsc.RTCNT = 0;
 		bsc.RTCSR |= RTCSR_CMF;
 		if (bsc.RTCSR & RTCSR_CMIE)
-			panic("Interrupt from CMF not implemented\n");
+			(void)panic("Interrupt from CMF not implemented\n");
 		increment_bsc_rfcr();
 	}
 }
@@ -7983,7 +8024,7 @@ static void update_clocks(void)
 		}
 		break;
 	default:
-		panic("RTCNT clock input 0x%x not implemented\n", bsc.RTCSR & RTCSR_CKS);
+		(void)panic("RTCNT clock input 0x%x not implemented\n", bsc.RTCSR & RTCSR_CKS);
 		return;
 	}
 
@@ -8506,7 +8547,8 @@ static void do_xxd(uint32_t addr, uint32_t len)
 			if (line_start + i < addr || line_start + i >= end) {
 				printf("  ");
 			} else {
-				line_bytes[i] = read_byte(line_start + i);
+				if (read_byte(line_start + i, line_bytes + i))
+					return;
 				printf("%.2x", line_bytes[i]);
 			}
 			if (i & 1)
@@ -8754,7 +8796,7 @@ static enum pin_sense_mode button_to_mode(enum button button)
 	if (mode < 3)
 		return mode;
 	/* Panic if 3, bug if it's strictly above 3... */
-	panic("Reserved value for sense mode in ICR1\n");
+	(void)panic("Reserved value for sense mode in ICR1\n");
 	return 0;
 }
 
@@ -8982,7 +9024,7 @@ static int input_pen_handler(int argc, const char **argv)
 	/* The only mode in the selftests, but surely others will show up (TODO) */
 	mode = button_to_mode(BUTTON_PEN);
 	if (mode != rising) {
-		panic("Unsupported sense mode for touchscreen interrupts (%u)\n", mode);
+		(void)panic("Unsupported sense mode for touchscreen interrupts (%u)\n", mode);
 		return CLI_CONTINUE;
 	}
 
