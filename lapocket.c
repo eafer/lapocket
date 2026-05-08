@@ -1836,7 +1836,6 @@ static void eeprom_monitor_save_str(const char *str)
 		eeprom_monitor_dump_aligned();
 }
 
-/* TODO: add a "mon eeprom" command to turn monitor on/off */
 static void eeprom_monitor_save_frame(uint8_t frame, bool to_eeprom)
 {
 	char buf[4];
