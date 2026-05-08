@@ -4233,12 +4233,6 @@ static uint32_t mock_va_translation(uint32_t addr)
 	return addr;
 }
 
-#if 0
-#define DEBUG_PRINT(...)	printf(__VA_ARGS__)
-#else
-#define DEBUG_PRINT(...)	do {} while (0)
-#endif
-
 static int read_scif_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
@@ -5006,7 +5000,6 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 {
 	uint32_t pa;
 
-	DEBUG_PRINT("Reading byte from 0x%.8x\n", va);
 	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys(addr, &pa))
 		return 1;
@@ -5079,8 +5072,6 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 {
 	uint32_t pa;
 
-	DEBUG_PRINT("Reading word from 0x%.8x\n", addr);
-
 	if (addr & 1)
 		return panic("Unaligned word read from 0x%.8x\n", addr);
 	addr = mock_va_translation(addr);
@@ -5150,8 +5141,6 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 {
 	uint32_t pa;
 
-	DEBUG_PRINT("Reading longword from 0x%.8x\n", addr);
-
 	if (addr & 3)
 		return panic("Unaligned longword read from 0x%.8x\n", addr);
 	addr = mock_va_translation(addr);
@@ -5215,7 +5204,6 @@ static int write_byte(uint32_t addr, uint8_t val)
 {
 	uint32_t pa;
 
-	DEBUG_PRINT("Writing byte 0x%.2x to 0x%.8x\n", val, addr);
 	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys(addr, &pa))
 		return 1;
@@ -5298,8 +5286,6 @@ static int write_byte(uint32_t addr, uint8_t val)
 static int write_word(uint32_t addr, uint16_t val)
 {
 	uint32_t pa;
-
-	DEBUG_PRINT("Writing word 0x%.4x to 0x%.8x\n", val, addr);
 
 	if (addr & 1)
 		return panic("Unaligned word write to 0x%.8x\n", addr);
@@ -5385,8 +5371,6 @@ static int write_word(uint32_t addr, uint16_t val)
 static int write_longword(uint32_t addr, uint32_t val)
 {
 	uint32_t pa;
-
-	DEBUG_PRINT("Writing longword 0x%.8x to 0x%.8x\n", val, addr);
 
 	if (addr & 3)
 		return panic("Unaligned longword write to 0x%.8x\n", addr);
