@@ -4687,13 +4687,13 @@ static int intc_read_word_reg(uint32_t addr, uint16_t *val_p)
 		*val_p = intc.IPRB;
 		return 0;
 	case INTC_IPRC_OFF:
-		*val_p = intc.IPRB;
+		*val_p = intc.IPRC;
 		return 0;
 	case INTC_IPRD_OFF:
-		*val_p = intc.IPRB;
+		*val_p = intc.IPRD;
 		return 0;
 	case INTC_IPRE_OFF:
-		*val_p = intc.IPRB;
+		*val_p = intc.IPRE;
 		return 0;
 	default:
 		return panic("Attempted read of unsupported INTC register at 0x%.8x\n", addr);
