@@ -1005,13 +1005,16 @@ static bool is_display_regs_byte_address(uint32_t addr)
 {
 	if ((addr & 0xFF000000) != DISPLAY_OFF)
 		return false;
-	if (addr >= DISPLAY_FB_OFF && addr < DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
-		return false;
 	return true;
 }
 
 static int display_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
+	if (addr >= DISPLAY_FB_OFF && addr < DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
+		*val_p = display.fb[addr - DISPLAY_FB_OFF];
+		return 0;
+	}
+
 	switch (addr) {
 	case DISPLAY_WIDHT_L_OFF:
 		*val_p = (DISPLAY_FB_WIDTH >> 1) & 0x00FF;
@@ -1032,6 +1035,11 @@ static int display_read_byte_reg(uint32_t addr, uint8_t *val_p)
 
 static int display_write_byte_reg(uint32_t addr, uint8_t val)
 {
+	if (addr >= DISPLAY_FB_OFF && addr < DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
+		display.fb[addr - DISPLAY_FB_OFF] = val;
+		return 0;
+	}
+
 	switch (addr) {
 	case DISPLAY_PAL_IDX_OFF:
 		display.pal_idx = val;
@@ -5021,8 +5029,7 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 	case DISPLAY_OFF:
 		if (is_display_regs_byte_address(addr))
 			return display_read_byte_reg(addr, val_p);
-		*val_p = display.fb[addr - DISPLAY_FB_OFF];
-		return 0;
+		break;
 	case 0x13000000:
 		return xB3A_read_byte_reg(addr, val_p);
 	case 0x18000000:
@@ -5228,8 +5235,7 @@ static int write_byte(uint32_t addr, uint8_t val)
 	case DISPLAY_OFF:
 		if (is_display_regs_byte_address(addr))
 			return display_write_byte_reg(addr, val);
-		display.fb[addr - DISPLAY_FB_OFF] = val;
-		return 0;
+		break;
 	case 0x13000000:
 		return xB3A_write_byte_reg(addr, val);
 	case 0x18000000:
