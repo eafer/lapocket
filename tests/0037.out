@@ -1,0 +1,21 @@
+[XB3A] \d\n
+[XB3A] Hewlett Packard WinCE Firmware (C) 1999\d\n
+[XB3A] Build at 10:09:20 Jun  6 2000\d\n
+[XB3A] Reading EEPROM OS Configuration\d\n
+[XB3A] Store to HPWA ...Done\d\n
+[XB3A] Reading EEPROM Firmware Configuration\d\n
+[XB3A] Using EEPROM Firmware Setting ...\d\n
+[XB3A] Windows CE Kernel for Hitachi SH Built on Dec 14 1999 at 17:19:56
+[XB3A] \d\n
+[XB3A] SH-3 Kernel. FQCR=a111\d\n
+[XB3A] CCR=0001\d\n
+00005bd0: ---- ---- ---- ---- ---- ---- ---- ----  ................
+00005be0: ---- ---- ---- ---- ---- ---- ---- ----  ................
+0x00005bd0:	failed to read instruction
+0x00005bd2:	failed to read instruction
+0x00005bd4:	failed to read instruction
+0x00005bd6:	failed to read instruction
+0x00005bd0:	failed to read instruction
+0x00005bd2:	failed to read instruction
+0x00005bd4:	failed to read instruction
+0x00005bd6:	failed to read instruction

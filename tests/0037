@@ -1,0 +1,19 @@
+# Tests that debugger inspection doesn't trigger exceptions or panics
+
+monitor notice off
+
+# Boot and stop right before the first page fault
+break 0x8005AFA2
+run
+run
+run
+
+# Check that both xxd and disas report the memory errors correctly
+xxd 0x00005bd0 0x20
+disas 0x00005bd0 4
+
+# Check that no exception got triggered yet
+step 2
+disas +0 4
+
+exit

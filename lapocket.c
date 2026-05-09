@@ -22,6 +22,7 @@ static uint8_t enabled_monitors = MONITOR_NOTICE_ENABLED | MONITOR_SERIAL_ENABLE
 static void dump_cpu(void);
 static void print_backtrace(void);
 
+static bool running = false;
 static bool panicked = false;
 static bool kbinterrupted = false;
 
@@ -64,10 +65,6 @@ void notice(const char *format, ...)
 	va_end(args);
 }
 
-/*
- * TODO: panic() should check if code is actually executing, so that it can be
- * called during disassembly, memory inspection, etc.
- */
 #ifdef __GNUC__
 [[gnu::format(printf, 1, 2)]]
 #endif
@@ -76,6 +73,10 @@ void notice(const char *format, ...)
 	va_list args;
 
 	if (panicked)
+		return 1;
+
+	/* Don't panic just because the debugger looked at something invalid */
+	if (!running)
 		return 1;
 
 	dump_all_monitors();
@@ -7295,7 +7296,6 @@ static int execute(uint32_t pc)
 	default:
 		return panic("Instruction 0x%x not implemented\n", insn);
 	}
-
 	return ret;
 }
 
@@ -8284,6 +8284,8 @@ static int run(int steps)
 	uint32_t pc, old_pc;
 	int ret;
 
+	running = true;
+
 	while (true) {
 		if (!interactive && !script_file) {
 			dump_micro();
@@ -8300,12 +8302,14 @@ static int run(int steps)
 			delayed_slot = cpu.extra_state & EXTRA_IN_DELAYED;
 			pc = delayed_slot ? cpu.delayed_pc : cpu.PC;
 			old_pc = cpu.PC;
-			if (pc_is_breakpoint(pc))
-				return 0;
+			if (pc_is_breakpoint(pc)) {
+				ret = 0;
+				break;
+			}
 			ret = execute(pc);
 			if (ret) {
 				become_interactive();
-				return ret;
+				break;
 			}
 			if (delayed_slot) {
 				cpu.extra_state &= ~EXTRA_IN_DELAYED;
@@ -8317,14 +8321,21 @@ static int run(int steps)
 			update_scif();
 			update_top_light();
 			if (!forever) {
-				if (--steps == 0)
-					return 0;
+				if (--steps == 0) {
+					ret = 0;
+					break;
+				}
 			}
 		}
 
-		if (kbinterrupted)
-			return 0;
+		if (kbinterrupted) {
+			ret = 0;
+			break;
+		}
 	}
+
+	running = false;
+	return ret;
 }
 
 #define CLI_CONTINUE	0
