@@ -7904,8 +7904,10 @@ static void disassemble(uint32_t pc)
 {
 	uint16_t insn;
 
-	if (read_insn(pc, &insn))
+	if (read_insn(pc, &insn)) {
+		printf("failed to read instruction\n");
 		return;
+	}
 
 	switch (insn & 0xF000) {
 	case 0x0000:
@@ -8530,9 +8532,12 @@ static void do_xxd(uint32_t addr, uint32_t len)
 			if (line_start + i < addr || line_start + i >= end) {
 				printf("  ");
 			} else {
-				if (read_byte(line_start + i, line_bytes + i))
-					return;
-				printf("%.2x", line_bytes[i]);
+				if (read_byte(line_start + i, line_bytes + i)) {
+					line_bytes[i] = 0; /* Just something nonprintable */
+					printf("--");
+				} else {
+					printf("%.2x", line_bytes[i]);
+				}
 			}
 			if (i & 1)
 				printf(" ");
