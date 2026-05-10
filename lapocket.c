@@ -4031,8 +4031,12 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 			if (write && (tlb_data & TLB_D))
 				return panic("Writing to non-dirty page\n");
 			protection = (tlb_data & TLB_PR_MASK) >> TLB_PR_SHIFT;
-			if (write || protection != 0x02)
-				return panic("Only world-readable pages are supported\n");
+			if (protection == 0x02) {
+				if (write)
+					return panic("Writing to world-readable page\n");
+			} else if (protection != 0x03) {
+				return panic("Unsupported page protection %d\n", protection);
+			}
 			*pa = mmu_tlb_to_pa(tlb_data) + (va - vpage_addr);
 			return 0;
 		}
