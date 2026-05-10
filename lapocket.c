@@ -1001,6 +1001,7 @@ struct cpu {
 #define EXTRA_READ_TLB_INVALID	16U	/* TLB invalid exception on read */
 #define EXTRA_WRITE_TLB_INVALID	32U	/* TLB invalid exception on write */
 #define EXTRA_TLB_INVALID		(EXTRA_READ_TLB_INVALID | EXTRA_WRITE_TLB_INVALID)
+#define EXTRA_INITIAL_WRITE		64U	/* Initial page write exception */
 
 /*
  * Lots of other display registers get accessed below the display ram. Most of
@@ -4036,8 +4037,10 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 			} else if (protection != 0x03) {
 				return panic("Unsupported page protection %d\n", protection);
 			}
-			if (write && (tlb_data & TLB_D))
-				return panic("Writing to non-dirty page\n");
+			if (write && (tlb_data & TLB_D)) {
+				cpu_flag = EXTRA_INITIAL_WRITE;
+				break;
+			}
 			*pa = mmu_tlb_to_pa(tlb_data) + (va - vpage_addr);
 			return 0;
 		}
@@ -8394,12 +8397,29 @@ static void tlb_invalid_accept(void)
 	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
 }
 
+static void initial_page_write_accept(void)
+{
+	mmu.PTEH = cpu.tlb_exception_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
+	mmu.TEA = cpu.tlb_exception_addr;
+	cpu.EXPEVT = 0x80;
+	cpu.SPC = cpu.PC;
+	cpu.SSR = cpu.SR;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_set_rc(cpu.tlb_exception_way);
+	cpu.PC = cpu.VBR + 0x100 + 4;
+
+	cpu.extra_state &= ~EXTRA_INITIAL_WRITE;
+	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+}
+
 static void exception_check(void)
 {
 	if (cpu.extra_state & EXTRA_PAGE_TLB_MISS)
 		return tlb_miss_accept();
 	if (cpu.extra_state & EXTRA_TLB_INVALID)
 		return tlb_invalid_accept();
+	if (cpu.extra_state & EXTRA_INITIAL_WRITE)
+		return initial_page_write_accept();
 	return interrupt_check();
 }
 
