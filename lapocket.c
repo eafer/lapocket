@@ -3964,6 +3964,16 @@ static uint32_t mmu_tlb_to_pa(uint32_t tlb_data)
 	return (tlb_data & TLB_PPN_MASK) << (10 - TLB_PPN_SHIFT);
 }
 
+static int mmu_tlb_to_asid(uint32_t tlb_addr)
+{
+	return (tlb_addr & TLB_ASID_MASK) >> TLB_ASID_SHIFT;
+}
+
+static int mmu_pteh_to_asid(uint32_t pteh)
+{
+	return (pteh & PTEH_ASID_MASK) >> PTEH_ASID_SHIFT;
+}
+
 #define PAGE_MASK	(~((1 << 10) - 1))
 
 /* TODO: handle overlaps between mmu and debugger mappings */
@@ -3994,6 +4004,9 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 		if (!(tlb_addr & TLB_V))
 			continue;
 		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr) {
+			/* TODO: find a way to test the asid comparison */
+			if (mmu_tlb_to_asid(tlb_addr) != mmu_pteh_to_asid(mmu.PTEH))
+				continue;
 			if (write && (tlb_data & TLB_D))
 				return panic("Writing to non-dirty page\n");
 			if (!(tlb_addr & TLB_SH))
