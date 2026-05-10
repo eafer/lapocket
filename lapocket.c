@@ -3969,7 +3969,7 @@ static uint32_t mmu_tlb_to_pa(uint32_t tlb_data)
 /* TODO: handle overlaps between mmu and debugger mappings */
 static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 {
-	int area, entry, way;
+	int area, entry, way, protection;
 	uint32_t tlb_addr, tlb_data, vpage_addr;
 
 	/* No translation if the mmu is disabled */
@@ -3987,7 +3987,6 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 
 	vpage_addr = va & PAGE_MASK;
 
-	/* TODO: check protections and process privilege */
 	entry = mmu_virt_to_index(va);
 	for (way = 0; way < 4; ++way) {
 		tlb_addr = mmu.tlb_addr[entry][way];
@@ -3997,6 +3996,11 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr) {
 			if (write && (tlb_data & TLB_D))
 				return panic("Writing to non-dirty page\n");
+			if (!(tlb_addr & TLB_SH))
+				return panic("Non-shared page\n");
+			protection = (tlb_data & TLB_PR_MASK) >> TLB_PR_SHIFT;
+			if (write || protection != 0x02)
+				return panic("Only world-readable pages are supported\n");
 			*pa = mmu_tlb_to_pa(tlb_data) + (va - vpage_addr);
 			return 0;
 		}
