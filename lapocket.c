@@ -972,6 +972,7 @@ struct cpu {
 
 	uint32_t extra_state;	/* Extra state needed for the emulation */
 	uint32_t delayed_pc;	/* For a delayed branch instruction, its address */
+	uint32_t tlb_miss_addr;	/* After a TLB miss, address that caused it */
 } cpu = {0};
 
 /* Fields of the status register */
@@ -989,8 +990,11 @@ struct cpu {
 #define SR_I_SHIFT	4			/* Interrupt mask shift */
 
 /* Extra state flags */
-#define EXTRA_IN_DELAYED	1U	/* Executing the instruction after a branch */
-#define EXTRA_POWER_DOWN	2U	/* In power-down mode */
+#define EXTRA_IN_DELAYED		1U	/* Executing the instruction after a branch */
+#define EXTRA_POWER_DOWN		2U	/* In power-down mode */
+#define EXTRA_READ_TLB_MISS		4U	/* TLB miss exception on read */
+#define EXTRA_WRITE_TLB_MISS	8U	/* TLB miss exception on write */
+#define EXTRA_PAGE_TLB_MISS		(EXTRA_READ_TLB_MISS | EXTRA_WRITE_TLB_MISS)
 
 /*
  * Lots of other display registers get accessed below the display ram. Most of
@@ -3957,7 +3961,7 @@ static uint32_t mmu_tlb_to_pa(uint32_t tlb_data)
 #define PAGE_MASK	(~((1 << 10) - 1))
 
 /* TODO: handle overlaps between mmu and debugger mappings */
-static int mmu_virt_to_phys(uint32_t va, uint32_t *pa)
+static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 {
 	int area, entry, way;
 	uint32_t tlb_addr, tlb_data, vpage_addr;
@@ -3990,7 +3994,15 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa)
 		}
 	}
 
-	return panic("Page faults not yet implemented\n");
+	/* Don't try to make the debugger deal with an exception */
+	if (!running)
+		return 1;
+
+	if (cpu.extra_state & EXTRA_IN_DELAYED)
+		return panic("Page fault while executing delay slot\n");
+	cpu.extra_state |= write ? EXTRA_WRITE_TLB_MISS : EXTRA_READ_TLB_MISS;
+	cpu.tlb_miss_addr = va;
+	return 1;
 }
 
 
@@ -4038,7 +4050,7 @@ struct patches {
 struct bt_entry {
 	uint32_t origin;
 	uint32_t target;
-	bool interrupt;
+	bool exception;
 };
 
 #define MAX_BACKTRACE	128
@@ -4049,7 +4061,7 @@ struct backtrace {
 	struct bt_entry bt_entries[MAX_BACKTRACE];
 } backtrace = {0};
 
-static void backtrace_push(uint32_t origin, uint32_t target, bool interrupt)
+static void backtrace_push(uint32_t origin, uint32_t target, bool exception)
 {
 	struct bt_entry *entry = NULL;
 
@@ -4060,7 +4072,7 @@ static void backtrace_push(uint32_t origin, uint32_t target, bool interrupt)
 	entry = &backtrace.bt_entries[backtrace.bt_count++];
 	entry->origin = origin - 4;
 	entry->target = target - 4;
-	entry->interrupt = interrupt;
+	entry->exception = exception;
 }
 
 static void backtrace_pop(void)
@@ -5009,7 +5021,7 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 	uint32_t pa;
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa))
+	if (mmu_virt_to_phys(addr, &pa, false /* write */))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5082,7 +5094,7 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 	if (addr & 1)
 		return panic("Unaligned word read from 0x%.8x\n", addr);
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa))
+	if (mmu_virt_to_phys(addr, &pa, false /* write */))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5151,7 +5163,7 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 	if (addr & 3)
 		return panic("Unaligned longword read from 0x%.8x\n", addr);
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa))
+	if (mmu_virt_to_phys(addr, &pa, false /* write */))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5212,7 +5224,7 @@ static int write_byte(uint32_t addr, uint8_t val)
 	uint32_t pa;
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa))
+	if (mmu_virt_to_phys(addr, &pa, true /* write */))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5297,7 +5309,7 @@ static int write_word(uint32_t addr, uint16_t val)
 		return panic("Unaligned word write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa))
+	if (mmu_virt_to_phys(addr, &pa, true /* write */))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5382,7 +5394,7 @@ static int write_longword(uint32_t addr, uint32_t val)
 		return panic("Unaligned longword write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa))
+	if (mmu_virt_to_phys(addr, &pa, true /* write */))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5843,7 +5855,7 @@ static void reset(void)
 
 	/* Due to the pipeline, the instruction on execution is always at PC-4 */
 	cpu.PC = BOOTLOADER_OFF + 4;
-	backtrace_push(0, cpu.PC, false /* interrupt */);
+	backtrace_push(0, cpu.PC, false /* exception */);
 
 	init_intc();
 	init_bsc();
@@ -6345,7 +6357,7 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		return prepare_delayed_slot(target);
 	case INSN_M_JSR_AT_RM:
 		target = read_gp_register(m) + 4;
-		backtrace_push(cpu.PC, target, false /* interrupt */);
+		backtrace_push(cpu.PC, target, false /* exception */);
 		cpu.PR = cpu.PC;
 		return prepare_delayed_slot(target);
 	case INSN_M_LDS_RM_MACH:
@@ -7032,7 +7044,7 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 		cpu.EXPEVT = 0x160;
 		/* The manual seems to be missing the "+4" here... */
 		cpu.PC = cpu.VBR + 0x0100 + 4;
-		backtrace_push(cpu.SPC - 2, cpu.PC, false /* interrupt */);
+		backtrace_push(cpu.SPC - 2, cpu.PC, false /* exception */);
 		return 0;
 	case INSN_D_MOVA:
 		d = insn & 0x00FFU;
@@ -8191,7 +8203,7 @@ static void irq_accept(int i, int priority)
 	cpu.PC = cpu.VBR + 0x600 + 4;
 	cpu.INTEVT = priority_to_intevt(priority);
 	cpu.INTEVT2 = 0x600 + i * 0x20;
-	backtrace_push(cpu.SPC, cpu.PC, true /* interrupt */);
+	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
 }
 
 /*
@@ -8208,7 +8220,7 @@ static void pint_accept(int i, int priority)
 	cpu.PC = cpu.VBR + 0x600 + 4;
 	cpu.INTEVT = priority_to_intevt(priority);
 	cpu.INTEVT2 = 0x700 + i * 0x20;
-	backtrace_push(cpu.SPC, cpu.PC, true /* interrupt */);
+	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
 }
 
 /* Returns the priority level for IRQi */
@@ -8276,6 +8288,47 @@ static void interrupt_check(void)
 		return pint_accept(1, pint_priority(1));
 }
 
+/* TODO: this doesn't matter much for the emulator, so it's a bit untested */
+static void mmu_update_rc(uint32_t va)
+{
+	int way, entry, rc;
+
+	entry = mmu_virt_to_index(va);
+	for (way = 0; way < 4; ++way) {
+		if (!(mmu.tlb_addr[entry][way] & TLB_V))
+			break;
+	}
+
+	if (way < 4)
+		rc = way;
+	else
+		rc = ((mmu.MMUCR & MMUCR_RC_MASK) >> MMUCR_RC_SHIFT) + 1;
+
+	mmu.MMUCR = (mmu.MMUCR & ~MMUCR_RC_MASK) | (rc << MMUCR_RC_SHIFT);
+}
+
+static void tlb_miss_accept(void)
+{
+	mmu.PTEH = cpu.tlb_miss_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
+	mmu.TEA = cpu.tlb_miss_addr;
+	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_MISS ? 0x60 : 0x40;
+	cpu.SPC = cpu.PC;
+	cpu.SSR = cpu.SR;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_update_rc(cpu.tlb_miss_addr);
+	cpu.PC = cpu.VBR + 0x400 + 4;
+
+	cpu.extra_state &= ~EXTRA_PAGE_TLB_MISS;
+	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+}
+
+static void exception_check(void)
+{
+	if (cpu.extra_state & EXTRA_PAGE_TLB_MISS)
+		return tlb_miss_accept();
+	return interrupt_check();
+}
+
 /* Emulate indefinitely if @steps < 0 */
 static int run(int steps)
 {
@@ -8295,7 +8348,7 @@ static int run(int steps)
 		}
 
 		/* This can change the PC, so do it before the breakpoint check */
-		interrupt_check();
+		exception_check();
 
 		/* TODO: actually sleep instead of looping around interrupt checks */
 		if (!(cpu.extra_state & EXTRA_POWER_DOWN)) {
@@ -8307,7 +8360,7 @@ static int run(int steps)
 				break;
 			}
 			ret = execute(pc);
-			if (ret) {
+			if (ret && panicked) {
 				become_interactive();
 				break;
 			}
@@ -8358,11 +8411,11 @@ static void print_backtrace(void)
 	if (backtrace.bt_count == 0)
 		return;
 
-	backtrace_push(cpu.PC, 0, false /* interrupt */);
+	backtrace_push(cpu.PC, 0, false /* exception */);
 	for (i = backtrace.bt_count - 1; i > 0; --i) {
 		curr = &backtrace.bt_entries[i];
 		prev = &backtrace.bt_entries[i - 1];
-		printf("%c[0x%.8x] <0x%.8x>+0x%x\n", prev->interrupt ? '*' : ' ', curr->origin, prev->target, curr->origin - prev->target);
+		printf("%c[0x%.8x] <0x%.8x>+0x%x\n", prev->exception ? '*' : ' ', curr->origin, prev->target, curr->origin - prev->target);
 	}
 	backtrace_pop();
 }
@@ -8735,7 +8788,7 @@ static int set_addr_to_value(void *addr, int width, const char *value)
 	}
 
 	if (addr == &cpu.PC)
-		backtrace_push(0, cpu.PC, false /* interrupt */);
+		backtrace_push(0, cpu.PC, false /* exception */);
 	return CLI_CONTINUE;
 }
 
