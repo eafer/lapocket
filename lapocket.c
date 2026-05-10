@@ -3974,6 +3974,21 @@ static int mmu_pteh_to_asid(uint32_t pteh)
 	return (pteh & PTEH_ASID_MASK) >> PTEH_ASID_SHIFT;
 }
 
+/* TODO: find a way to test the asid comparison */
+static bool mmu_asid_is_match(uint32_t tlb_addr)
+{
+	/* Shared pages can be accessed by any process */
+	if (tlb_addr & TLB_SH)
+		return true;
+	/*
+	 * In single vm mode all processes see the same mapping, but only the
+	 * matching ASID (and root) can access it. This mode isn't in use though...
+	 */
+	if ((mmu.MMUCR & MMUCR_SV) && (cpu.SR & SR_MD_BIT))
+		return true;
+	return mmu_tlb_to_asid(tlb_addr) == mmu_pteh_to_asid(mmu.PTEH);
+}
+
 #define PAGE_MASK	(~((1 << 10) - 1))
 
 /* TODO: handle overlaps between mmu and debugger mappings */
@@ -4004,13 +4019,10 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 		if (!(tlb_addr & TLB_V))
 			continue;
 		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr) {
-			/* TODO: find a way to test the asid comparison */
-			if (mmu_tlb_to_asid(tlb_addr) != mmu_pteh_to_asid(mmu.PTEH))
+			if (!mmu_asid_is_match(tlb_addr))
 				continue;
 			if (write && (tlb_data & TLB_D))
 				return panic("Writing to non-dirty page\n");
-			if (!(tlb_addr & TLB_SH))
-				return panic("Non-shared page\n");
 			protection = (tlb_data & TLB_PR_MASK) >> TLB_PR_SHIFT;
 			if (write || protection != 0x02)
 				return panic("Only world-readable pages are supported\n");
