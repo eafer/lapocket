@@ -972,7 +972,11 @@ struct cpu {
 
 	uint32_t extra_state;	/* Extra state needed for the emulation */
 	uint32_t delayed_pc;	/* For a delayed branch instruction, its address */
-	uint32_t tlb_miss_addr;	/* After a TLB miss, address that caused it */
+
+	/* After any TLB exception, the address that caused it */
+	uint32_t tlb_exception_addr;
+	/* After a TLB invalid exception, the way that caused it */
+	uint8_t tlb_invalid_way;
 } cpu = {0};
 
 /* Fields of the status register */
@@ -995,6 +999,9 @@ struct cpu {
 #define EXTRA_READ_TLB_MISS		4U	/* TLB miss exception on read */
 #define EXTRA_WRITE_TLB_MISS	8U	/* TLB miss exception on write */
 #define EXTRA_PAGE_TLB_MISS		(EXTRA_READ_TLB_MISS | EXTRA_WRITE_TLB_MISS)
+#define EXTRA_READ_TLB_INVALID	16U	/* TLB invalid exception on read */
+#define EXTRA_WRITE_TLB_INVALID	32U	/* TLB invalid exception on write */
+#define EXTRA_TLB_INVALID		(EXTRA_READ_TLB_INVALID | EXTRA_WRITE_TLB_INVALID)
 
 /*
  * Lots of other display registers get accessed below the display ram. Most of
@@ -4016,11 +4023,11 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 	for (way = 0; way < 4; ++way) {
 		tlb_addr = mmu.tlb_addr[entry][way];
 		tlb_data = mmu.tlb_data[entry][way];
-		if (!(tlb_addr & TLB_V))
-			continue;
 		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr) {
 			if (!mmu_asid_is_match(tlb_addr))
 				continue;
+			if (!(tlb_addr & TLB_V))
+				break;
 			if (write && (tlb_data & TLB_D))
 				return panic("Writing to non-dirty page\n");
 			protection = (tlb_data & TLB_PR_MASK) >> TLB_PR_SHIFT;
@@ -4036,9 +4043,15 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 		return 1;
 
 	if (cpu.extra_state & EXTRA_IN_DELAYED)
-		return panic("Page fault while executing delay slot\n");
-	cpu.extra_state |= write ? EXTRA_WRITE_TLB_MISS : EXTRA_READ_TLB_MISS;
-	cpu.tlb_miss_addr = va;
+		return panic("TLB exception while executing delay slot\n");
+	/* TODO: just have one flag for read/write common to all exceptions... */
+	if (way == 4) {
+		cpu.extra_state |= write ? EXTRA_WRITE_TLB_MISS : EXTRA_READ_TLB_MISS;
+	} else {
+		cpu.extra_state |= write ? EXTRA_WRITE_TLB_INVALID : EXTRA_READ_TLB_INVALID;
+		cpu.tlb_invalid_way = way;
+	}
+	cpu.tlb_exception_addr = va;
 	return 1;
 }
 
@@ -8325,8 +8338,13 @@ static void interrupt_check(void)
 		return pint_accept(1, pint_priority(1));
 }
 
+static void mmu_set_rc(int rc)
+{
+	mmu.MMUCR = (mmu.MMUCR & ~MMUCR_RC_MASK) | (rc << MMUCR_RC_SHIFT);
+}
+
 /* TODO: this doesn't matter much for the emulator, so it's a bit untested */
-static void mmu_update_rc(uint32_t va)
+static void mmu_update_rc_after_miss(uint32_t va)
 {
 	int way, entry, rc;
 
@@ -8340,22 +8358,36 @@ static void mmu_update_rc(uint32_t va)
 		rc = way;
 	else
 		rc = ((mmu.MMUCR & MMUCR_RC_MASK) >> MMUCR_RC_SHIFT) + 1;
-
-	mmu.MMUCR = (mmu.MMUCR & ~MMUCR_RC_MASK) | (rc << MMUCR_RC_SHIFT);
+	mmu_set_rc(rc);
 }
 
 static void tlb_miss_accept(void)
 {
-	mmu.PTEH = cpu.tlb_miss_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
-	mmu.TEA = cpu.tlb_miss_addr;
+	mmu.PTEH = cpu.tlb_exception_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
+	mmu.TEA = cpu.tlb_exception_addr;
 	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_MISS ? 0x60 : 0x40;
 	cpu.SPC = cpu.PC;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
-	mmu_update_rc(cpu.tlb_miss_addr);
+	mmu_update_rc_after_miss(cpu.tlb_exception_addr);
 	cpu.PC = cpu.VBR + 0x400 + 4;
 
 	cpu.extra_state &= ~EXTRA_PAGE_TLB_MISS;
+	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+}
+
+static void tlb_invalid_accept(void)
+{
+	mmu.PTEH = cpu.tlb_exception_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
+	mmu.TEA = cpu.tlb_exception_addr;
+	mmu_set_rc(cpu.tlb_invalid_way);
+	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_INVALID ? 0x60 : 0x40;
+	cpu.SPC = cpu.PC;
+	cpu.SSR = cpu.SR;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	cpu.PC = cpu.VBR + 0x100 + 4;
+
+	cpu.extra_state &= ~EXTRA_TLB_INVALID;
 	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
 }
 
@@ -8363,6 +8395,8 @@ static void exception_check(void)
 {
 	if (cpu.extra_state & EXTRA_PAGE_TLB_MISS)
 		return tlb_miss_accept();
+	if (cpu.extra_state & EXTRA_TLB_INVALID)
+		return tlb_invalid_accept();
 	return interrupt_check();
 }
 
