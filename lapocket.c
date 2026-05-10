@@ -4253,6 +4253,15 @@ static void write_gp_register(int n, uint32_t val)
 		cpu.R[n] = val;
 }
 
+/* Read register from the bank not in use. Only for registers 0-7. */
+static uint32_t read_gp_register_bank(int n)
+{
+	if (cpu.SR & SR_RB_BIT)
+		return cpu.R[n];
+	else
+		return cpu.R_BANK1[n];
+}
+
 /* Write to register from the bank not in use. Only for registers 0-7. */
 static void write_gp_register_bank(int n, uint32_t val)
 {
@@ -5935,7 +5944,10 @@ static int execute(uint32_t pc);
  * manual. TODO: change all the older names with this new scheme.
  */
 #define INSN_N_STC_SR_RN			0x0002
+#define INSN_N_STCGBR				0x0012
 #define INSN_N_STCVBR				0x0022
+#define INSN_N_STCSSR				0x0032
+#define INSN_N_STCSPC				0x0042
 #define INSN_N_PREF					0x0083
 #define INSN_NM_MOVBS0				0x0004
 #define INSN_NM_MOVWS0				0x0005
@@ -6018,7 +6030,10 @@ static int execute(uint32_t pc);
 #define INSN_M_JMP					0x402B
 #define INSN_M_LDCMVBR				0x4027
 #define INSN_M_LDCMSSR				0x4037
+#define INSN_M_LDCSSR				0x403E
 #define INSN_M_LDCMSPC				0x4047
+#define INSN_M_LDCSPC				0x404E
+#define INSN_N_STCMRm				0x4083
 #define INSN_M_LDCRn_BANK			0x408E
 #define INSN_M_LDCR1_BANK			0x409E
 #define INSN_M_LDCR2_BANK			0x40AE
@@ -6183,6 +6198,7 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 {
 	uint8_t n = (insn & 0x0F00U) >> 8;
 	uint32_t nval;
+	uint8_t bankreg;
 	bool tbit;
 
 	switch (insn & 0xF0FF) {
@@ -6192,10 +6208,22 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 		write_gp_register(n, cpu.SR);
 		cpu.PC += 2;
 		return 0;
+	case INSN_N_STCGBR:
+		write_gp_register(n, cpu.GBR);
+		cpu.PC += 2;
+		return 0;
 	case INSN_N_STCVBR:
 		if (!(cpu.SR & SR_MD_BIT))
 			return panic("Privilege violation! (TODO)\n");
 		write_gp_register(n, cpu.VBR);
+		cpu.PC += 2;
+		return 0;
+	case INSN_N_STCSSR:
+		write_gp_register(n, cpu.SSR);
+		cpu.PC += 2;
+		return 0;
+	case INSN_N_STCSPC:
+		write_gp_register(n, cpu.SPC);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_PREF:
@@ -6392,6 +6420,15 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 		cpu.PC += 2;
 		return 0;
 	default:
+		if ((insn & 0xF08F) == INSN_N_STCMRm) {
+			bankreg = (insn & 0x0070U) >> 4;
+			nval = read_gp_register(n) - 4;
+			if (write_longword(nval, read_gp_register_bank(bankreg)))
+				return 1;
+			write_gp_register(n, nval);
+			cpu.PC += 2;
+			return 0;
+		}
 		break;
 	}
 	return panic("N format instruction 0x%x not implemented\n", insn);
@@ -6523,6 +6560,14 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		/* According to the manual's pseudocode, some flags get unset... */
 		cpu.SSR = data32 & 0x700003F3;
 		write_gp_register(m, mval + 4);
+		cpu.PC += 2;
+		return 0;
+	case INSN_M_LDCSPC:
+		cpu.SPC = read_gp_register(m);
+		cpu.PC += 2;
+		return 0;
+	case INSN_M_LDCSSR:
+		cpu.SSR = read_gp_register(m) & 0x700003F3;
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDCMSPC:
@@ -7438,13 +7483,23 @@ static void disassemble_ni8_format(uint32_t pc, uint16_t insn)
 static void disassemble_n_format(uint32_t pc, uint16_t insn)
 {
 	uint8_t n = (insn & 0x0F00U) >> 8;
+	uint8_t bankreg;
 
 	switch (insn & 0xF0FF) {
 	case INSN_N_STC_SR_RN:
 		printf("STC SR,R%u\n", n);
 		return;
+	case INSN_N_STCGBR:
+		printf("STC GBR,R%u\n", n);
+		return;
 	case INSN_N_STCVBR:
 		printf("STC VBR,R%u\n", n);
+		return;
+	case INSN_N_STCSSR:
+		printf("STC SSR,R%u\n", n);
+		return;
+	case INSN_N_STCSPC:
+		printf("STC SPC,R%u\n", n);
 		return;
 	case INSN_N_PREF:
 		printf("PREF @R%u\n", n);
@@ -7528,6 +7583,11 @@ static void disassemble_n_format(uint32_t pc, uint16_t insn)
 		printf("SHLR16 R%u\n", n);
 		return;
 	default:
+		if ((insn & 0xF08F) == INSN_N_STCMRm) {
+			bankreg = (insn & 0x0070U) >> 4;
+			printf("STC.L R%u_BANK,@-R%u\n", bankreg, n);
+			return;
+		}
 		printf("N format instruction 0x%x not implemented\n", insn);
 		return;
 	}
@@ -7584,6 +7644,12 @@ static void disassemble_m_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_M_LDCMSSR:
 		printf("LDC.L @R%u+,SSR\n", m);
+		return;
+	case INSN_M_LDCSPC:
+		printf("LDC R%u,SPC\n", m);
+		return;
+	case INSN_M_LDCSSR:
+		printf("LDC R%u,SSR\n", m);
 		return;
 	case INSN_M_LDCMSPC:
 		printf("LDC.L @R%u+,SPC\n", m);
