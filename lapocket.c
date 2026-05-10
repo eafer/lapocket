@@ -3868,7 +3868,7 @@ static int mmu_load_pte_to_tlb(void)
 	if (mmu.PTEL & PTEL_C)
 		tlb_data |= TLB_C;
 	if (mmu.PTEL & PTEL_D)
-		return panic("Attempt to dirty a page\n");
+		tlb_data |= TLB_D;
 
 	*tlb_addr_p = tlb_addr;
 	*tlb_data_p = tlb_data;
@@ -3915,6 +3915,12 @@ static int mmu_read_longword_reg(uint32_t addr, uint32_t *val_p)
 	switch (addr) {
 	case MMU_PTEH_OFF:
 		*val_p = mmu.PTEH;
+		return 0;
+	case MMU_TTB_OFF:
+		*val_p = mmu.TTB;
+		return 0;
+	case MMU_TEA_OFF:
+		*val_p = mmu.TEA;
 		return 0;
 	default:
 		return panic("Attempted read from unsupported MMU register at 0x%.8x\n", addr);
@@ -3989,6 +3995,8 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 		if (!(tlb_addr & TLB_V))
 			continue;
 		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr) {
+			if (write && (tlb_data & TLB_D))
+				return panic("Writing to non-dirty page\n");
 			*pa = mmu_tlb_to_pa(tlb_data) + (va - vpage_addr);
 			return 0;
 		}

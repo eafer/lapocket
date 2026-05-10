@@ -1,0 +1,21 @@
+# Tests that tlb miss exceptions work correctly
+
+monitor notice off
+monitor xb3a off
+
+# Boot and stop right before the first page fault
+break 0x8005AFA2
+run
+xxd 0x00005bd0 0x20		# Check the contents before invalidation
+run
+run
+
+xxd 0x00005bd0 0x20		# Confirm that xxd now reports invalid contents
+
+# Run the exception handler to map the function at <0x00005bd0>
+break 0x00005bd0
+run
+run
+xxd 0x00005bd0 0x20		# Confirm that the contents look correct again
+
+exit
