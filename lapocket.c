@@ -973,10 +973,9 @@ struct cpu {
 	uint32_t extra_state;	/* Extra state needed for the emulation */
 	uint32_t delayed_pc;	/* For a delayed branch instruction, its address */
 
-	/* After any TLB exception, the address that caused it */
+	/* After any TLB exception, the address and way that triggered it */
 	uint32_t tlb_exception_addr;
-	/* After a TLB invalid exception, the way that caused it */
-	uint8_t tlb_invalid_way;
+	uint8_t tlb_exception_way;
 } cpu = {0};
 
 /* Fields of the status register */
@@ -4002,7 +4001,7 @@ static bool mmu_asid_is_match(uint32_t tlb_addr)
 static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 {
 	int area, entry, way, protection;
-	uint32_t tlb_addr, tlb_data, vpage_addr;
+	uint32_t tlb_addr, tlb_data, vpage_addr, cpu_flag;
 
 	/* No translation if the mmu is disabled */
 	if (!(mmu.MMUCR & MMUCR_AT)) {
@@ -4026,8 +4025,10 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 		if (mmu_tlb_to_va(tlb_addr, entry) == vpage_addr) {
 			if (!mmu_asid_is_match(tlb_addr))
 				continue;
-			if (!(tlb_addr & TLB_V))
+			if (!(tlb_addr & TLB_V)) {
+				cpu_flag = write ? EXTRA_WRITE_TLB_INVALID : EXTRA_READ_TLB_INVALID;
 				break;
+			}
 			protection = (tlb_data & TLB_PR_MASK) >> TLB_PR_SHIFT;
 			if (protection == 0x02) {
 				if (write)
@@ -4041,6 +4042,9 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 			return 0;
 		}
 	}
+	/* TODO: just have one flag for read/write common to all exceptions... */
+	if (way == 4)
+		cpu_flag = write ? EXTRA_WRITE_TLB_MISS : EXTRA_READ_TLB_MISS;
 
 	/* Don't try to make the debugger deal with an exception */
 	if (!running)
@@ -4048,13 +4052,8 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 
 	if (cpu.extra_state & EXTRA_IN_DELAYED)
 		return panic("TLB exception while executing delay slot\n");
-	/* TODO: just have one flag for read/write common to all exceptions... */
-	if (way == 4) {
-		cpu.extra_state |= write ? EXTRA_WRITE_TLB_MISS : EXTRA_READ_TLB_MISS;
-	} else {
-		cpu.extra_state |= write ? EXTRA_WRITE_TLB_INVALID : EXTRA_READ_TLB_INVALID;
-		cpu.tlb_invalid_way = way;
-	}
+	cpu.extra_state |= cpu_flag;
+	cpu.tlb_exception_way = way; /* Ignored for miss exceptions */
 	cpu.tlb_exception_addr = va;
 	return 1;
 }
@@ -8384,7 +8383,7 @@ static void tlb_invalid_accept(void)
 {
 	mmu.PTEH = cpu.tlb_exception_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
 	mmu.TEA = cpu.tlb_exception_addr;
-	mmu_set_rc(cpu.tlb_invalid_way);
+	mmu_set_rc(cpu.tlb_exception_way);
 	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_INVALID ? 0x60 : 0x40;
 	cpu.SPC = cpu.PC;
 	cpu.SSR = cpu.SR;
