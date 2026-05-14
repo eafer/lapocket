@@ -4037,7 +4037,8 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 			} else if (protection != 0x03) {
 				return panic("Unsupported page protection %d\n", protection);
 			}
-			if (write && (tlb_data & TLB_D)) {
+			if (write && !(tlb_data & TLB_D)) {
+				notice("Initial page write exception!\n");
 				cpu_flag = EXTRA_INITIAL_WRITE;
 				break;
 			}

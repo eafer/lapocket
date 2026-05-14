@@ -1,0 +1,28 @@
+# Tests that tlb miss exceptions work correctly
+
+monitor notice off
+monitor xb3a off
+
+# Boot and stop before the memset() call that triggers the exception. Check
+# that the area to zero out is unreadable.
+break 0x8004cf50
+run
+xxd 0x0201ff00 0x100
+
+# Set the physical memory so that I can later tell that the write worked
+set l:0x0CFFF700 0xFEEDBEEF
+set l:0x0CFFF780 0xFEEDBEEF
+set l:0x0CFFF7F0 0xFEEDBEEF
+
+# Break before returning from the TLB miss handler and check the mapping
+break 0x80042D60
+run
+xxd 0x0201ff00 0x100
+
+# Now break after memset() is done and check that the area got zeroed
+break 0x8004cf54
+run
+disas +0 1
+xxd 0x0201ff00 0x100
+
+exit
