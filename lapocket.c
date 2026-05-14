@@ -8434,9 +8434,15 @@ static void mmu_update_rc_after_miss(uint32_t va)
 	mmu_set_rc(rc);
 }
 
+static void mmu_set_pteh_vpn(uint32_t addr)
+{
+	/* We always assume a 1 KiB page size */
+	mmu.PTEH = (mmu.PTEH & ~PTEH_VPN_MASK) | (addr & PTEH_VPN_MASK);
+}
+
 static void tlb_miss_accept(void)
 {
-	mmu.PTEH = cpu.tlb_exception_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
+	mmu_set_pteh_vpn(cpu.tlb_exception_addr);
 	mmu.TEA = cpu.tlb_exception_addr;
 	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_MISS ? 0x60 : 0x40;
 	cpu.SPC = cpu.PC;
@@ -8451,7 +8457,7 @@ static void tlb_miss_accept(void)
 
 static void tlb_invalid_accept(void)
 {
-	mmu.PTEH = cpu.tlb_exception_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
+	mmu_set_pteh_vpn(cpu.tlb_exception_addr);
 	mmu.TEA = cpu.tlb_exception_addr;
 	mmu_set_rc(cpu.tlb_exception_way);
 	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_INVALID ? 0x60 : 0x40;
@@ -8466,7 +8472,7 @@ static void tlb_invalid_accept(void)
 
 static void initial_page_write_accept(void)
 {
-	mmu.PTEH = cpu.tlb_exception_addr & PTEH_VPN_MASK;	/* Assume 1 KiB page size */
+	mmu_set_pteh_vpn(cpu.tlb_exception_addr);
 	mmu.TEA = cpu.tlb_exception_addr;
 	cpu.EXPEVT = 0x80;
 	cpu.SPC = cpu.PC;
