@@ -1003,6 +1003,7 @@ struct cpu {
 #define EXTRA_TLB_INVALID		(EXTRA_READ_TLB_INVALID | EXTRA_WRITE_TLB_INVALID)
 #define EXTRA_INITIAL_WRITE		64U	/* Initial page write exception */
 #define EXTRA_RESERVED_INSN		128U	/* Reserved instruction exception */
+#define EXTRA_EXCEPTION			(EXTRA_PAGE_TLB_MISS | EXTRA_TLB_INVALID | EXTRA_INITIAL_WRITE | EXTRA_RESERVED_INSN)
 
 /*
  * Lots of other display registers get accessed below the display ram. Most of
@@ -8514,14 +8515,20 @@ static void reserved_instruction_accept(void)
 
 static void exception_check(void)
 {
-	if (cpu.extra_state & EXTRA_PAGE_TLB_MISS)
-		return tlb_miss_accept();
-	if (cpu.extra_state & EXTRA_TLB_INVALID)
-		return tlb_invalid_accept();
-	if (cpu.extra_state & EXTRA_INITIAL_WRITE)
-		return initial_page_write_accept();
-	if (cpu.extra_state & EXTRA_RESERVED_INSN)
-		return reserved_instruction_accept();
+	if (cpu.extra_state & EXTRA_EXCEPTION) {
+		if (cpu.SR & SR_BL_BIT) {
+			(void)panic("Exception (0x%.8x) got blocked\n", cpu.extra_state);
+			return;
+		}
+		if (cpu.extra_state & EXTRA_PAGE_TLB_MISS)
+			return tlb_miss_accept();
+		if (cpu.extra_state & EXTRA_TLB_INVALID)
+			return tlb_invalid_accept();
+		if (cpu.extra_state & EXTRA_INITIAL_WRITE)
+			return initial_page_write_accept();
+		if (cpu.extra_state & EXTRA_RESERVED_INSN)
+			return reserved_instruction_accept();
+	}
 	return interrupt_check();
 }
 
