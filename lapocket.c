@@ -6976,18 +6976,8 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		if (read_byte(mval, &data8))
 			return 1;
 		write_gp_register(n, sign_extend_byte(data8));
-		/*
-		 * The pseudocode claims that "+1" only happens when source and target
-		 * registers are not the same, but that doesn't match the behaviour of
-		 * the instructions that go in the other direction, and functions such
-		 * as <8003F398> would end up with their registers shifted. So I'll
-		 * ignore the manual for now (TODO: confirm on physical hardware).
-		 *
-		 * On further thought: I think trying to save R15 to the stack is
-		 * probably a bug in <8003F398>, and the manual is right here. So it
-		 * won't matter much either way, because no sane code will try this?
-		 */
-		write_gp_register(m, mval + 1);
+		if (n != m)
+			write_gp_register(m, mval + 1);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVWP:
@@ -6995,8 +6985,8 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		if (read_word(mval, &data16))
 			return 1;
 		write_gp_register(n, sign_extend_word(data16));
-		/* See the comment in INSN_NM_MOVBP */
-		write_gp_register(m, mval + 2);
+		if (n != m)
+			write_gp_register(m, mval + 2);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVLP:
@@ -7004,8 +6994,8 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		if (read_longword(mval, &data32))
 			return 1;
 		write_gp_register(n, data32);
-		/* See the comment in INSN_NM_MOVBP */
-		write_gp_register(m, mval + 4);
+		if (n != m)
+			write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_NOT:
