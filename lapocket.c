@@ -3924,11 +3924,17 @@ static int mmu_read_longword_reg(uint32_t addr, uint32_t *val_p)
 	case MMU_PTEH_OFF:
 		*val_p = mmu.PTEH;
 		return 0;
+	case MMU_PTEL_OFF:
+		*val_p = mmu.PTEL;
+		return 0;
 	case MMU_TTB_OFF:
 		*val_p = mmu.TTB;
 		return 0;
 	case MMU_TEA_OFF:
 		*val_p = mmu.TEA;
+		return 0;
+	case MMU_MMUCR_OFF:
+		*val_p = mmu.MMUCR;
 		return 0;
 	default:
 		return panic("Attempted read from unsupported MMU register at 0x%.8x\n", addr);
@@ -6050,6 +6056,7 @@ static int execute(uint32_t pc);
 #define INSN_NM_MOVL_RN_ATRM		0x6002
 #define INSN_NM_MOV_RN_RM			0x6003
 #define INSN_NM_MOVBP				0x6004
+#define INSN_NM_MOVWP				0x6005
 #define INSN_NM_MOVLP				0x6006
 #define INSN_NM_NOT					0x6007
 #define INSN_NM_NEGC				0x600A
@@ -6983,6 +6990,15 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		write_gp_register(m, mval + 1);
 		cpu.PC += 2;
 		return 0;
+	case INSN_NM_MOVWP:
+		mval = read_gp_register(m);
+		if (read_word(mval, &data16))
+			return 1;
+		write_gp_register(n, sign_extend_word(data16));
+		/* See the comment in INSN_NM_MOVBP */
+		write_gp_register(m, mval + 2);
+		cpu.PC += 2;
+		return 0;
 	case INSN_NM_MOVLP:
 		mval = read_gp_register(m);
 		if (read_longword(mval, &data32))
@@ -7813,6 +7829,9 @@ static void disassemble_nm_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_NM_MOVBP:
 		printf("MOV.B @R%u+,R%u\n", m, n);
+		return;
+	case INSN_NM_MOVWP:
+		printf("MOV.W @R%u+,R%u\n", m, n);
 		return;
 	case INSN_NM_MOVLP:
 		printf("MOV.L @R%u+,R%u\n", m, n);
