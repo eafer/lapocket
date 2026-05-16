@@ -1002,6 +1002,7 @@ struct cpu {
 #define EXTRA_WRITE_TLB_INVALID	32U	/* TLB invalid exception on write */
 #define EXTRA_TLB_INVALID		(EXTRA_READ_TLB_INVALID | EXTRA_WRITE_TLB_INVALID)
 #define EXTRA_INITIAL_WRITE		64U	/* Initial page write exception */
+#define EXTRA_RESERVED_INSN		128U	/* Reserved instruction exception */
 
 /*
  * Lots of other display registers get accessed below the display ram. Most of
@@ -7291,7 +7292,12 @@ static int execute_0uuu_format(uint32_t pc, uint16_t insn)
 	case 0x000E:
 		return execute_nm_format(pc, insn);
 	default:
-		return panic("0uuu instruction 0x%x not implemented\n", insn);
+		if (insn != 0x0000)
+			return panic("0uuu instruction 0x%x not implemented\n", insn);
+		if (cpu.extra_state & EXTRA_IN_DELAYED)
+			return panic("Reserved instruction 0x%x in delay slot\n", insn);
+		cpu.extra_state |= EXTRA_RESERVED_INSN;
+		return 1;
 	}
 }
 
@@ -8485,6 +8491,18 @@ static void initial_page_write_accept(void)
 	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
 }
 
+static void reserved_instruction_accept(void)
+{
+	cpu.SPC = cpu.PC;
+	cpu.SSR = cpu.SR;
+	cpu.EXPEVT = 0x180;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	cpu.PC = cpu.VBR + 0x100 + 4;
+
+	cpu.extra_state &= ~EXTRA_RESERVED_INSN;
+	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+}
+
 static void exception_check(void)
 {
 	if (cpu.extra_state & EXTRA_PAGE_TLB_MISS)
@@ -8493,6 +8511,8 @@ static void exception_check(void)
 		return tlb_invalid_accept();
 	if (cpu.extra_state & EXTRA_INITIAL_WRITE)
 		return initial_page_write_accept();
+	if (cpu.extra_state & EXTRA_RESERVED_INSN)
+		return reserved_instruction_accept();
 	return interrupt_check();
 }
 
