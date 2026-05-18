@@ -1,0 +1,20 @@
+# Tests that the firmware can print a panic message. This covers one new
+# instruction (MOVWP) and reading for the first time from two MMU registers
+# (PTEL and MMUCR).
+
+monitor notice off
+
+# Stick an invalid 0x0000 instruction at some random location
+patch 0x80043020 0x0000
+
+# Boot normally and break right before the panic to check that the cpu contents
+# match the firmware report
+set PC 0x80042980
+break 0x80043020
+run
+dump cpu
+
+# Now let it panic, and break at the infinite loop that seems to follow a halt
+break 0x80056772
+run
+exit

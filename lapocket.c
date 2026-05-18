@@ -7299,6 +7299,11 @@ static int execute_0uuu_format(uint32_t pc, uint16_t insn)
 	case 0x000E:
 		return execute_nm_format(pc, insn);
 	default:
+		/*
+		 * Many opcodes are still not implemented, so right now 0x0000 is the
+		 * only one that definitely doesn't belong to any instruction. I use it
+		 * to test reserved instruction exceptions.
+		 */
 		if (insn != 0x0000)
 			return panic("0uuu instruction 0x%x not implemented\n", insn);
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
