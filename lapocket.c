@@ -6130,7 +6130,7 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 			return panic("Privilege violation! (TODO)\n");
 		backtrace_pop();
 		cpu.SR = cpu.SSR;
-		return prepare_delayed_slot(cpu.SPC);
+		return prepare_delayed_slot(cpu.SPC + 4);
 	case INSN_0_DIV0U:
 		cpu.SR &= ~(SR_T_BIT | SR_Q_BIT | SR_M_BIT);
 		cpu.PC += 2;
@@ -7149,7 +7149,7 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 		 * TRAPA instruction is saved to the SPC". This makes sense, otherwise
 		 * RTE would bring us back to the same TRAPA instruction...
 		 */
-		cpu.SPC = cpu.PC + 2;
+		cpu.SPC = (cpu.PC + 2) - 4;
 		cpu.SR |= (SR_BL_BIT | SR_RB_BIT | SR_MD_BIT);
 		cpu.EXPEVT = 0x160;
 		/* The manual seems to be missing the "+4" here... */
@@ -8336,7 +8336,7 @@ static void irq_accept(int i, int priority)
 {
 	if (priority <= sr_interrupt_mask())
 		return;
-	cpu.SPC = cpu.PC;
+	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
 	cpu.PC = cpu.VBR + 0x600 + 4;
@@ -8353,7 +8353,7 @@ static void pint_accept(int i, int priority)
 {
 	if (priority <= sr_interrupt_mask())
 		return;
-	cpu.SPC = cpu.PC;
+	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
 	cpu.PC = cpu.VBR + 0x600 + 4;
@@ -8461,7 +8461,7 @@ static void tlb_miss_accept(void)
 	mmu_set_pteh_vpn(cpu.tlb_exception_addr);
 	mmu.TEA = cpu.tlb_exception_addr;
 	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_MISS ? 0x60 : 0x40;
-	cpu.SPC = cpu.PC;
+	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
 	mmu_update_rc_after_miss(cpu.tlb_exception_addr);
@@ -8477,7 +8477,7 @@ static void tlb_invalid_accept(void)
 	mmu.TEA = cpu.tlb_exception_addr;
 	mmu_set_rc(cpu.tlb_exception_way);
 	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_INVALID ? 0x60 : 0x40;
-	cpu.SPC = cpu.PC;
+	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
 	cpu.PC = cpu.VBR + 0x100 + 4;
@@ -8491,7 +8491,7 @@ static void initial_page_write_accept(void)
 	mmu_set_pteh_vpn(cpu.tlb_exception_addr);
 	mmu.TEA = cpu.tlb_exception_addr;
 	cpu.EXPEVT = 0x80;
-	cpu.SPC = cpu.PC;
+	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
 	mmu_set_rc(cpu.tlb_exception_way);
@@ -8503,7 +8503,7 @@ static void initial_page_write_accept(void)
 
 static void reserved_instruction_accept(void)
 {
-	cpu.SPC = cpu.PC;
+	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.EXPEVT = 0x180;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);

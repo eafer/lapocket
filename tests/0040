@@ -1,0 +1,13 @@
+# Tests that RTE works as expected after manipulation of the SPC register
+
+monitor notice off
+monitor xb3a off
+
+# Run until we set up the kernel thread
+break 0xA0042C78
+run
+step 2
+# Confirm that we jumped to the main function of nk.exe
+disas +0 1
+
+exit
