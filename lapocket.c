@@ -6131,6 +6131,10 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 		if (!(cpu.SR & SR_MD_BIT))
 			return panic("Privilege violation! (TODO)\n");
 		backtrace_pop();
+		if (backtrace.bt_count == 0) {
+			/* RTE is also used to start a new thread */
+			backtrace_push(0, cpu.SPC + 4, false /* exception */);
+		}
 		cpu.SR = cpu.SSR;
 		return prepare_delayed_slot(cpu.SPC + 4);
 	case INSN_0_DIV0U:
