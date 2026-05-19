@@ -4062,8 +4062,6 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 	if (!running)
 		return 1;
 
-	if (cpu.extra_state & EXTRA_IN_DELAYED)
-		return panic("TLB exception while executing delay slot\n");
 	cpu.extra_state |= cpu_flag;
 	cpu.tlb_exception_way = way; /* Ignored for miss exceptions */
 	cpu.tlb_exception_addr = va;
@@ -8593,10 +8591,19 @@ static int run(int steps)
 				break;
 			}
 			if (delayed_slot) {
+				if (cpu.extra_state & EXTRA_EXCEPTION) {
+					/*
+					 * Exceptions are not accepted in a delay slot. For
+					 * "re-execution type exceptions", rerun the branch
+					 * instuction.
+					 */
+					cpu.PC = cpu.delayed_pc - 2;
+				} else {
+					/* PC got increased, but the target remains the same */
+					cpu.PC = old_pc;
+				}
 				cpu.extra_state &= ~EXTRA_IN_DELAYED;
 				cpu.delayed_pc = 0;
-				/* PC got increased, but the target remains the same */
-				cpu.PC = old_pc;
 			}
 			update_clocks();
 			update_scif();

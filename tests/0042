@@ -1,0 +1,29 @@
+# Tests mmu exceptions in a delay slot
+
+monitor notice off
+monitor xb3a off
+
+# Boot and run until the first delay slot that triggers an exception
+break 0x80048D96
+run
+
+# Check that the virtual address is unreadable
+xxd 0x03fe5df4 2
+# Check the physical address that we are supposed to modify
+xxd 0x8cffd1f4 2
+# Confirm the value of R0 that we want to write (0x63)
+dump cpu
+# Take this chance to test the recent fixes for the backtrace
+backtrace
+
+# This exception gets hit twice before it's finally dealt with. My guess is
+# that the page tables aren't ready the first time around.
+run
+run
+
+# Finally, run the delay slot and check that the write went through
+step
+xxd 0x03fe5df4 2
+xxd 0x8cffd1f4 2
+
+exit
