@@ -5955,6 +5955,7 @@ static int execute(uint32_t pc);
 #define INSN_N_STC_SR_RN			0x0002
 #define INSN_N_STCGBR				0x0012
 #define INSN_N_STCVBR				0x0022
+#define INSN_N_STSPR				0x002A
 #define INSN_N_STCSSR				0x0032
 #define INSN_N_STCSPC				0x0042
 #define INSN_N_PREF					0x0083
@@ -6015,6 +6016,7 @@ static int execute(uint32_t pc);
 #define INSN_N_CMPPL				0x4015
 #define INSN_M_LDS_RM_MACL			0x401A
 #define INSN_M_LDC_RM_GBR			0x401E
+#define INSN_M_LDSPR				0x402A
 #define INSN_M_LDCVBR				0x402E
 #define INSN_N_STSMMACH				0x4002
 #define INSN_N_STSMMACL				0x4012
@@ -6226,6 +6228,10 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 		if (!(cpu.SR & SR_MD_BIT))
 			return panic("Privilege violation! (TODO)\n");
 		write_gp_register(n, cpu.VBR);
+		cpu.PC += 2;
+		return 0;
+	case INSN_N_STSPR:
+		write_gp_register(n, cpu.PR);
 		cpu.PC += 2;
 		return 0;
 	case INSN_N_STCSSR:
@@ -6478,6 +6484,10 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_M_LDC_RM_GBR:
 		cpu.GBR = read_gp_register(m);
+		cpu.PC += 2;
+		return 0;
+	case INSN_M_LDSPR:
+		cpu.PR = read_gp_register(m);
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDCVBR:
@@ -7514,6 +7524,9 @@ static void disassemble_n_format(uint32_t pc, uint16_t insn)
 	case INSN_N_STCVBR:
 		printf("STC VBR,R%u\n", n);
 		return;
+	case INSN_N_STSPR:
+		printf("STS PR,R%u\n", n);
+		return;
 	case INSN_N_STCSSR:
 		printf("STC SSR,R%u\n", n);
 		return;
@@ -7648,6 +7661,9 @@ static void disassemble_m_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_M_LDC_RM_GBR:
 		printf("LDC R%u,GBR\n", m);
+		return;
+	case INSN_M_LDSPR:
+		printf("LDS R%u,PR\n", m);
 		return;
 	case INSN_M_LDCVBR:
 		printf("LDC R%u,VBR\n", m);
