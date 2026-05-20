@@ -8639,7 +8639,11 @@ static void print_backtrace(void)
 	if (backtrace.bt_count == 0)
 		return;
 
-	backtrace_push(cpu.PC, 0, false /* exception */);
+	if (cpu.extra_state & EXTRA_IN_DELAYED)
+		backtrace_push(cpu.delayed_pc, 0, false /* exception */);
+	else
+		backtrace_push(cpu.PC, 0, false /* exception */);
+
 	for (i = backtrace.bt_count - 1; i > 0; --i) {
 		curr = &backtrace.bt_entries[i];
 		prev = &backtrace.bt_entries[i - 1];
