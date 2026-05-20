@@ -1003,7 +1003,8 @@ struct cpu {
 #define EXTRA_TLB_INVALID		(EXTRA_READ_TLB_INVALID | EXTRA_WRITE_TLB_INVALID)
 #define EXTRA_INITIAL_WRITE		64U	/* Initial page write exception */
 #define EXTRA_RESERVED_INSN		128U	/* Reserved instruction exception */
-#define EXTRA_EXCEPTION			(EXTRA_PAGE_TLB_MISS | EXTRA_TLB_INVALID | EXTRA_INITIAL_WRITE | EXTRA_RESERVED_INSN)
+#define EXTRA_READ_ADDR_ERROR	256U	/* Address error on read */
+#define EXTRA_EXCEPTION			(EXTRA_PAGE_TLB_MISS | EXTRA_TLB_INVALID | EXTRA_INITIAL_WRITE | EXTRA_RESERVED_INSN | EXTRA_READ_ADDR_ERROR)
 
 /*
  * Lots of other display registers get accessed below the display ram. Most of
@@ -5163,8 +5164,11 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 {
 	uint32_t pa;
 
-	if (addr & 1)
-		return panic("Unaligned word read from 0x%.8x\n", addr);
+	if (addr & 1) {
+		cpu.extra_state |= EXTRA_READ_ADDR_ERROR;
+		cpu.tlb_exception_addr = addr;
+		return 1;
+	}
 	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys(addr, &pa, false /* write */))
 		return 1;
@@ -5232,8 +5236,11 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 {
 	uint32_t pa;
 
-	if (addr & 3)
-		return panic("Unaligned longword read from 0x%.8x\n", addr);
+	if (addr & 3) {
+		cpu.extra_state |= EXTRA_READ_ADDR_ERROR;
+		cpu.tlb_exception_addr = addr;
+		return 1;
+	}
 	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys(addr, &pa, false /* write */))
 		return 1;
@@ -8536,6 +8543,19 @@ static void reserved_instruction_accept(void)
 	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
 }
 
+static void address_error_accept(void)
+{
+	mmu.TEA = cpu.tlb_exception_addr;
+	cpu.SPC = cpu.PC - 4;
+	cpu.SSR = cpu.SR;
+	cpu.EXPEVT = 0x0E0;	/* Only reads supported, for now */
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	cpu.PC = cpu.VBR + 0x100 + 4;
+
+	cpu.extra_state &= ~EXTRA_READ_ADDR_ERROR;
+	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+}
+
 static void exception_check(void)
 {
 	if (cpu.extra_state & EXTRA_EXCEPTION) {
@@ -8551,6 +8571,8 @@ static void exception_check(void)
 			return initial_page_write_accept();
 		if (cpu.extra_state & EXTRA_RESERVED_INSN)
 			return reserved_instruction_accept();
+		if (cpu.extra_state & EXTRA_READ_ADDR_ERROR)
+			return address_error_accept();
 	}
 	return interrupt_check();
 }
