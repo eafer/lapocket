@@ -8372,7 +8372,7 @@ static void irq_accept(int i, int priority)
 	cpu.PC = cpu.VBR + 0x600 + 4;
 	cpu.INTEVT = priority_to_intevt(priority);
 	cpu.INTEVT2 = 0x600 + i * 0x20;
-	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
 /*
@@ -8389,7 +8389,7 @@ static void pint_accept(int i, int priority)
 	cpu.PC = cpu.VBR + 0x600 + 4;
 	cpu.INTEVT = priority_to_intevt(priority);
 	cpu.INTEVT2 = 0x700 + i * 0x20;
-	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
 /* Returns the priority level for IRQi */
@@ -8498,7 +8498,7 @@ static void tlb_miss_accept(void)
 	cpu.PC = cpu.VBR + 0x400 + 4;
 
 	cpu.extra_state &= ~EXTRA_PAGE_TLB_MISS;
-	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
 static void tlb_invalid_accept(void)
@@ -8513,7 +8513,7 @@ static void tlb_invalid_accept(void)
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
 	cpu.extra_state &= ~EXTRA_TLB_INVALID;
-	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
 static void initial_page_write_accept(void)
@@ -8528,7 +8528,7 @@ static void initial_page_write_accept(void)
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
 	cpu.extra_state &= ~EXTRA_INITIAL_WRITE;
-	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
 static void reserved_instruction_accept(void)
@@ -8540,7 +8540,7 @@ static void reserved_instruction_accept(void)
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
 	cpu.extra_state &= ~EXTRA_RESERVED_INSN;
-	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
 static void address_error_accept(void)
@@ -8553,7 +8553,7 @@ static void address_error_accept(void)
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
 	cpu.extra_state &= ~EXTRA_READ_ADDR_ERROR;
-	backtrace_push(cpu.SPC, cpu.PC, true /* exception */);
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
 static void exception_check(void)
