@@ -3630,6 +3630,12 @@ static int cache_write_longword_reg(uint32_t addr, uint32_t val)
 
 static int cache_read_longword_reg(uint32_t addr, uint32_t *val_p)
 {
+	/* Our cache is always empty */
+	if (addr >= CACHE_ADDR_MAP_OFF && addr < CACHE_ADDR_MAP_OFF + CACHE_ADDR_MAP_LEN) {
+		*val_p = 0;
+		return 0;
+	}
+
 	switch (addr) {
 	case CACHE_CCR_OFF:
 		*val_p = cache.CCR;
@@ -5262,6 +5268,7 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 		*val_p = *(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF));
 		return 0;
 	case 0xFF000000:
+	case 0xF0000000:
 	case 0x04000000:
 		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE)
 			return panic("Bad width (32) for read from PFC\n");
