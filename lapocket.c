@@ -2903,6 +2903,7 @@ static int ioports_read_byte_reg(uint32_t addr, uint8_t *val_p)
 #define XB3A_080_OFF	0x13A00080
 #define XB3A_084_OFF	0x13A00084
 #define XB3A_0AC_OFF	0x13A000AC
+#define XB3A_0B8_OFF	0x13A000B8
 #define XB3A_13C_OFF	0x13A0013C
 #define XB3A_18C_OFF	0x13A0018C
 #define XB3A_19C_OFF	0x13A0019C
@@ -3067,6 +3068,10 @@ static int xB3A_read_byte_reg(uint32_t addr, uint8_t *val_p)
 		return 0;
 	case XB3A_1A0_OFF:
 		*val_p = 0x00;
+		return 0;
+	case XB3A_0B8_OFF:
+		/* Fastest way to exit <0x800373F8>. No idea if that's a good thing. */
+		*val_p = 0x08;
 		return 0;
 	default:
 		return panic("Attempted read from unsupported xB3A register at 0x%.8x\n", addr);
