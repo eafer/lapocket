@@ -6096,6 +6096,8 @@ static int execute(uint32_t pc);
 #define INSN_NM_MOVWP				0x6005
 #define INSN_NM_MOVLP				0x6006
 #define INSN_NM_NOT					0x6007
+#define INSN_NM_SWAPB				0x6008
+#define INSN_NM_SWAPW				0x6009
 #define INSN_NM_NEGC				0x600A
 #define INSN_NM_NEG					0x600B
 #define INSN_NM_EXTUB_RM_RN			0x600C
@@ -7051,6 +7053,21 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		write_gp_register(n, ~read_gp_register(m));
 		cpu.PC += 2;
 		return 0;
+	case INSN_NM_SWAPB:
+		mval = read_gp_register(m);
+		nval = mval & 0xFFFF0000;
+		nval |= (mval & 0x00FF) << 8;
+		nval |= (mval & 0xFF00) >> 8;
+		write_gp_register(n, nval);
+		cpu.PC += 2;
+		return 0;
+	case INSN_NM_SWAPW:
+		mval = read_gp_register(m);
+		nval = (mval & 0xFFFF0000) >> 16;
+		nval |= (mval & 0x0000FFFF) << 16;
+		write_gp_register(n, nval);
+		cpu.PC += 2;
+		return 0;
 	case INSN_NM_NEGC:
 		mval = read_gp_register(m);
 		tbit = cpu.SR & SR_T_BIT;
@@ -7888,6 +7905,12 @@ static void disassemble_nm_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_NM_NOT:
 		printf("NOT R%u,R%u\n", m, n);
+		return;
+	case INSN_NM_SWAPB:
+		printf("SWAP.B R%u.R%u\n", m, n);
+		return;
+	case INSN_NM_SWAPW:
+		printf("SWAP.W R%u.R%u\n", m, n);
 		return;
 	case INSN_NM_NEGC:
 		printf("NEGC R%u,R%u\n", m, n);

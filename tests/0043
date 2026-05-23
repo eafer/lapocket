@@ -1,0 +1,103 @@
+# Tests memcmp() to cover the new SWAPB and SWAPW instructions.
+
+# Break on any of the RTS instructions
+break 0x8007E064
+break 0x8007E088
+break 0x8007E0AC
+break 0x8007E0C8
+break 0x8007E0DE
+break 0x8007E0FE
+
+# Test multiple reorderings of the memory areas to try to cover all possible
+# issues with the swap instructions.
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 6
+set l:0x0C004000 0x00000001
+set l:0x0C005000 0x00000100
+run
+step 2
+dump cpu	# R0 should be 1
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 6
+set l:0x0C004000 0x00000100
+set l:0x0C005000 0x00000100
+run
+step 2
+dump cpu	# R0 should be 0
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 6
+set l:0x0C004000 0x00010000
+set l:0x0C005000 0x00000100
+run
+step 2
+dump cpu	# R0 should be -1
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 6
+set l:0x0C004000 0x00010000
+set l:0x0C005000 0x01000000
+run
+step 2
+dump cpu	# R0 should be 1
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 2
+set l:0x0C004000 0x00010000
+set l:0x0C005000 0x01000000
+run
+step 2
+dump cpu	# R0 should be 0
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 6
+set l:0x0C004000 0x00000100
+set l:0x0C005000 0x01000000
+run
+step 2
+dump cpu	# R0 should be 1
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 6
+set l:0x0C004000 0x00000001
+set l:0x0C005000 0x01000000
+run
+step 2
+dump cpu	# R0 should be 1
+
+set PC 0x8007DFE0
+set R4 0x0C004000
+set R5 0x0C005000
+set R6 6
+set l:0x0C004000 0x00010000
+set l:0x0C005000 0x00000001
+run
+step 2
+dump cpu	# R0 should be -1
+
+# Also try one run with actual strings
+set PC 0x8007DFE0
+set R4 0x8000041C
+set R5 0x8000045C
+set R6 30
+run
+step 2
+dump cpu	# R0 should be 1
+
+exit
