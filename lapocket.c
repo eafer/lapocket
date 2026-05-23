@@ -3150,6 +3150,11 @@ static bool is_dmac_longword_address(uint32_t addr)
 static int dmac_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
+	case DMAC_DMAOR_OFF:
+		if (val)
+			return panic("Setting DMAC operation register (0x%.2x)\n", val);
+		/* This just means "disable DMA transfers on all channels" */
+		return 0;
 	case DMAC_CMSTR_OFF:
 		if (val)
 			return panic("DMAC compare match timer not supported (0x%.2x)\n", val);
