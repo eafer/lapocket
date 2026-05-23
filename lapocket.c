@@ -1690,6 +1690,7 @@ static int motherboard_read_word_reg(uint32_t addr, uint16_t *val_p)
 	case 0x12000000:
 	case 0x12000014:
 	case 0x12000044:
+	case 0x12000068:
 	case 0x12000098:
 		/* No idea about these but keep going for now (TODO) */
 		notice("Reading from unknown motherboard register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
