@@ -65,6 +65,17 @@ void notice(const char *format, ...)
 	va_end(args);
 }
 
+/* Prints a notice only once to avoid a flood */
+#define NOTICE_ONCE(message)										\
+	do {															\
+		static bool printed = false;								\
+																	\
+		if (!printed) {												\
+			notice(message);										\
+			printed = true;											\
+		}															\
+	} while (false)
+
 #ifdef __GNUC__
 [[gnu::format(printf, 1, 2)]]
 #endif
@@ -4136,7 +4147,7 @@ static void backtrace_push(uint32_t origin, uint32_t target, bool exception)
 	struct bt_entry *entry = NULL;
 
 	if (backtrace.bt_count == MAX_BACKTRACE) {
-		notice("Backtrace stack seems full?\n");
+		NOTICE_ONCE("Backtrace stack seems full?\n");
 		return;
 	}
 	entry = &backtrace.bt_entries[backtrace.bt_count++];
@@ -4148,7 +4159,7 @@ static void backtrace_push(uint32_t origin, uint32_t target, bool exception)
 static void backtrace_pop(void)
 {
 	if (backtrace.bt_count == 0) {
-		notice("Backtrace stack seems empty?\n");
+		NOTICE_ONCE("Backtrace stack seems empty?\n");
 		return;
 	}
 	--backtrace.bt_count;
