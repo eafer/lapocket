@@ -590,15 +590,16 @@ enum pin_sense_mode {
 
 /* USB commands encountered so far */
 /* Read last transaction status for each endpoint */
-#define USB_CTRLOUT_READ_STATUS		0x40	/* Control OUT */
-#define USB_CTRLIN_READ_STATUS		0x41	/* Control IN */
-#define USB_END1OUT_READ_STATUS		0x42	/* Endpoint 1 OUT */
-#define USB_END1IN_READ_STATUS		0x43	/* Endpoint 1 IN */
-#define USB_END2OUT_READ_STATUS		0x44	/* Endpoint 2 OUT */
-#define USB_END2IN_READ_STATUS		0x45	/* Endpoint 2 IN */
+#define USB_CTRLOUT_STATUS			0x40	/* Control OUT */
+#define USB_CTRLIN_STATUS			0x41	/* Control IN */
+#define USB_END1OUT_STATUS			0x42	/* Endpoint 1 OUT */
+#define USB_END1IN_STATUS			0x43	/* Endpoint 1 IN */
+#define USB_END2OUT_STATUS			0x44	/* Endpoint 2 OUT */
+#define USB_END2IN_STATUS			0x45	/* Endpoint 2 IN */
 #define USB_SET_END_ENABLE			0xD8	/* Set endpoint enable */
 #define USB_READ_INTR				0xF4	/* Read interrupt register */
 #define USB_SET_DMA					0xFB
+#define USB_SET_MODE				0xF3
 /* The manual doesn't list an FF command, so I'll use that as a NULL */
 #define USB_NO_COMMAND			0xFF
 
@@ -629,16 +630,33 @@ static int usb_execute_command(void)
 	switch (usb.command) {
 	case USB_SET_DMA:
 		byte = usb.buf[0];
-		if (byte)
+		if (byte & 0x3F)
 			return panic("USB DMA operation not supported\n");
+		if (byte & 0xC0)
+			notice("Interrupts enabled on USB endpoint buffer validation\n");
 		break;
 	case USB_SET_END_ENABLE:
 		byte = usb.buf[0];
 		if (byte)
 			return panic("USB generic/isochronous endpoints not supported\n");
 		break;
+	case USB_SET_MODE:
+		notice("USB mode set to 0x%.2x (clock division factor 0x%.2x)\n", usb.buf[0], usb.buf[1]);
+		break;
+	case USB_CTRLOUT_STATUS:
+	case USB_CTRLIN_STATUS:
+	case USB_END1OUT_STATUS:
+	case USB_END1IN_STATUS:
+	case USB_END2OUT_STATUS:
+	case USB_END2IN_STATUS:
+		/*
+		 * These can stall or re-initialize the endpoints. I don't think I need
+		 * to emulate anything right now. TODO: return the written status
+		 * correctly on reads.
+		 */
+		break;
 	default:
-		return panic("BUG: executing unsupported usb command 0x%.2x\n", usb.command);
+		return panic("Executing unsupported usb command 0x%.2x\n", usb.command);
 	}
 
 	usb.buf_off = 0;
@@ -650,19 +668,21 @@ static int usb_execute_command(void)
 static uint8_t usb_command_to_trans_len(uint8_t command)
 {
 	switch (command) {
-	case USB_CTRLOUT_READ_STATUS:
-	case USB_CTRLIN_READ_STATUS:
-	case USB_END1OUT_READ_STATUS:
-	case USB_END1IN_READ_STATUS:
-	case USB_END2OUT_READ_STATUS:
-	case USB_END2IN_READ_STATUS:
+	case USB_CTRLOUT_STATUS:
+	case USB_CTRLIN_STATUS:
+	case USB_END1OUT_STATUS:
+	case USB_END1IN_STATUS:
+	case USB_END2OUT_STATUS:
+	case USB_END2IN_STATUS:
 	case USB_SET_END_ENABLE:
 	case USB_SET_DMA:
 		return 1;
 	case USB_READ_INTR:
+	case USB_SET_MODE:
+	case 0xfd:
 		return 2;
 	default:
-		(void)panic("BUG: accepting unsupported usb command 0x%.2x\n", usb.command);
+		(void)panic("BUG: accepting unsupported usb command 0x%.2x\n", command);
 		return 0;
 	}
 }
@@ -672,15 +692,19 @@ static int usb_write_byte_reg(uint32_t addr, uint8_t val)
 	switch (addr) {
 	case USB_COMMANDS_OFF:
 		switch (val) {
-		case USB_CTRLOUT_READ_STATUS:
-		case USB_CTRLIN_READ_STATUS:
-		case USB_END1OUT_READ_STATUS:
-		case USB_END1IN_READ_STATUS:
-		case USB_END2OUT_READ_STATUS:
-		case USB_END2IN_READ_STATUS:
+		case 0xfd:
+			notice("Unknown usb command 0x%.2x\n", val);
+			/* Fall through */
+		case USB_CTRLOUT_STATUS:
+		case USB_CTRLIN_STATUS:
+		case USB_END1OUT_STATUS:
+		case USB_END1IN_STATUS:
+		case USB_END2OUT_STATUS:
+		case USB_END2IN_STATUS:
 		case USB_SET_END_ENABLE:
 		case USB_READ_INTR:
 		case USB_SET_DMA:
+		case USB_SET_MODE:
 			usb.buf_off = 0;
 			usb.buf_end = usb_command_to_trans_len(val);
 			usb.command = val;
