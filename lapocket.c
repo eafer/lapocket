@@ -4708,7 +4708,7 @@ static int intc_write_byte_reg(uint32_t addr, uint16_t val)
 		preserved_bits = val & IRR0_UNSETTABLE_MASK;
 		/* The PINT bits can't be written at all (TODO: handle these) */
 		preserved_bits |= (IRR0_PINT0R | IRR0_PINT1R);
-		val = (val & ~preserved_bits) | (rtc.RCR1 & preserved_bits);
+		val = (val & ~preserved_bits) | (intc.IRR0 & preserved_bits);
 		intc.IRR0 = val;
 		return 0;
 	case INTC_IRR1_OFF:
