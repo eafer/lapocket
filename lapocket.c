@@ -2373,7 +2373,7 @@ static int pfc_write_word_reg(uint32_t addr, uint16_t val)
 		*reg = val;
 		return 0;
 	case PFC_PECR_OFF:
-		if ((*reg ^ val) & ~(PFC_PE7_MASK | PFC_PE5_MASK | PFC_PE3_MASK | PFC_PE2_MASK | PFC_PE0_MASK | PFC_PE1_MASK))
+		if ((*reg ^ val) & ~(PFC_PE7_MASK | PFC_PE5_MASK | PFC_PE4_MASK | PFC_PE3_MASK | PFC_PE2_MASK | PFC_PE0_MASK | PFC_PE1_MASK))
 			return panic("Attempted PFC operation for unsupported pins (E: 0x%.4x -> 0x%.4x)\n", *reg, val);
 		if ((*reg ^ val) & PFC_PE7_MASK) {
 			if ((val & PFC_PE7_MASK) != PFC_PE7MD0)
@@ -2384,6 +2384,14 @@ static int pfc_write_word_reg(uint32_t addr, uint16_t val)
 			if ((val & PFC_PE5_MASK) != 0)
 				return panic("Unsupported PE5 configuration 0x%.4x\n", val);
 			notice("Pin PE5 set to \"CE2B output (PCMCIA)\"\n");
+		}
+		if ((*reg ^ val) & PFC_PE4_MASK) {
+			if ((val & PFC_PE4_MASK) == PFC_PE4MD0)
+				notice("Unknown pin PE4 set to output\n");
+			else if ((val & PFC_PE4_MASK) == (PFC_PE4MD0 | PFC_PE4MD1))
+				notice("Unknown pin PE4 set to input with pullup off\n");
+			else
+				return panic("Unsupported PE4 configuration 0x%.4x\n", val);
 		}
 		if ((*reg ^ val) & PFC_PE3_MASK) {
 			if ((val & PFC_PE3_MASK) != PFC_PE3MD0)
