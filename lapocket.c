@@ -6179,6 +6179,7 @@ static int execute(uint32_t pc);
 #define INSN_N_STCMSSR				0x4033
 #define INSN_N_STCMSPC				0x4043
 #define INSN_M_LDCSR				0x400E
+#define INSN_N_ROTL					0x4004
 #define INSN_N_ROTR					0x4005
 #define INSN_M_LDSMMACH				0x4006
 #define INSN_M_LDCMSR				0x4007
@@ -6552,6 +6553,15 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 		nval = read_gp_register(n) - 4;
 		if (write_longword(nval, cpu.PR))
 			return 1;
+		write_gp_register(n, nval);
+		cpu.PC += 2;
+		return 0;
+	case INSN_N_ROTL:
+		nval = read_gp_register(n);
+		tbit = nval & 0x80000000U;
+		write_flag_to_long(&cpu.SR, SR_T_BIT, tbit);
+		nval <<= 1;
+		write_flag_to_long(&nval, 1U, tbit);
 		write_gp_register(n, nval);
 		cpu.PC += 2;
 		return 0;
@@ -7772,6 +7782,9 @@ static void disassemble_n_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_N_STSL_PR_AT_MINUS_RN:
 		printf("STS.L PR,@-R%u\n", n);
+		return;
+	case INSN_N_ROTL:
+		printf("ROTL R%u\n", n);
 		return;
 	case INSN_N_ROTR:
 		printf("ROTR R%u\n", n);
