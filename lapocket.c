@@ -4087,6 +4087,11 @@ static int mmu_tlb_to_asid(uint32_t tlb_addr)
 	return (tlb_addr & TLB_ASID_MASK) >> TLB_ASID_SHIFT;
 }
 
+static int mmu_tlb_to_pr(uint32_t tlb_data)
+{
+	return (tlb_data & TLB_PR_MASK) >> TLB_PR_SHIFT;
+}
+
 static int mmu_pteh_to_asid(uint32_t pteh)
 {
 	return (pteh & PTEH_ASID_MASK) >> PTEH_ASID_SHIFT;
@@ -4108,6 +4113,28 @@ static bool mmu_asid_is_match(uint32_t tlb_addr)
 }
 
 #define PAGE_MASK	(~((1 << 10) - 1))
+
+static void mmu_dump_tlb(void)
+{
+	uint32_t tlb_addr, tlb_data;
+	int way, entry;
+
+	printf("MAPPING\t\t\tASID\tPROT\tDIRTY\tVALID\tSHARED\n");
+
+	for (way = 0; way < 4; ++way) {
+		for (entry = 0; entry < 32; ++entry) {
+			tlb_addr = mmu.tlb_addr[entry][way];
+			tlb_data = mmu.tlb_data[entry][way];
+			printf("0x%.8x", mmu_tlb_to_va(tlb_addr, entry));
+			printf("->0x%.8x", mmu_tlb_to_pa(tlb_data));
+			printf("\t%.2x", mmu_tlb_to_asid(tlb_addr));
+			printf("\t%.2x", mmu_tlb_to_pr(tlb_data));
+			printf("\t%s", tlb_data & TLB_D ? "YES" : "NO");
+			printf("\t%s", tlb_addr & TLB_V ? "YES" : "NO");
+			printf("\t%s\n", tlb_addr & TLB_SH ? "YES" : "NO");
+		}
+	}
+}
 
 /* TODO: handle overlaps between mmu and debugger mappings */
 static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
@@ -4141,7 +4168,7 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 				cpu_flag = write ? EXTRA_WRITE_TLB_INVALID : EXTRA_READ_TLB_INVALID;
 				break;
 			}
-			protection = (tlb_data & TLB_PR_MASK) >> TLB_PR_SHIFT;
+			protection = mmu_tlb_to_pr(tlb_data);
 			if (protection == 0x02) {
 				if (write)
 					return panic("Writing to world-readable page\n");
@@ -8921,6 +8948,8 @@ static int dump_command_handler(int argc, const char **argv)
 
 	if (strcmp(sel, "cpu") == 0)
 		dump_cpu();
+	else if (strcmp(sel, "tlb") == 0)
+		mmu_dump_tlb();
 	else
 		printf("Unsupported dump selector \"%s\"\n", sel);
 	return CLI_CONTINUE;
@@ -9883,7 +9912,7 @@ struct shell_command shell_command_list[] = {
 	{"break", "break address", break_command_handler},
 	{"crc", "crc card sector", crc_command_handler},
 	{"disas", "disas [[+|-]address [lenght]]", disas_command_handler},
-	{"dump", "dump [cpu]", dump_command_handler},
+	{"dump", "dump [cpu|tlb]", dump_command_handler},
 	{"exit", "exit", exit_command_handler},
 	{"help", "help [command]", help_command_handler},
 	{"input", "input [button]", input_command_handler},
