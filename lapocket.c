@@ -3222,6 +3222,85 @@ static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 }
 
 /*
+ * The registers infrared data-association interface are accessed at address
+ * range 0xA4000140-0xA4000150, which is actually in the P2 area so the top 3
+ * bits are ignored. TODO: actually implement infrared?
+ */
+#define IRDA_SCSMR1_OFF		0x04000140
+#define IRDA_SCBRR1_OFF		0x04000142
+#define IRDA_SCSCR1_OFF		0x04000144
+#define IRDA_SCFTDR1_OFF	0x04000146
+#define IRDA_SCSSR1_OFF		0x04000148
+#define IRDA_SCFRDR1_OFF	0x0400014A
+#define IRDA_SCFCR1_OFF		0x0400014C
+#define IRDA_SCFDR1_OFF		0x0400014E
+
+static bool is_irda_byte_address(uint32_t addr)
+{
+	switch (addr) {
+	case IRDA_SCSMR1_OFF:
+	case IRDA_SCBRR1_OFF:
+	case IRDA_SCSCR1_OFF:
+	case IRDA_SCFTDR1_OFF:
+	case IRDA_SCFRDR1_OFF:
+	case IRDA_SCFCR1_OFF:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool is_irda_word_address(uint32_t addr)
+{
+	switch (addr) {
+	case IRDA_SCSSR1_OFF:
+	case IRDA_SCFDR1_OFF:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int read_irda_word_reg(uint32_t addr, uint16_t *val_p)
+{
+	switch (addr) {
+	default:
+		return panic("Attempted read of unsupported IrDA register at 0x%.8x\n", addr);
+	}
+}
+
+static int read_irda_byte_reg(uint32_t addr, uint8_t *val_p)
+{
+	switch (addr) {
+	case IRDA_SCSCR1_OFF:
+		*val_p = 0;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported IrDA register at 0x%.8x\n", addr);
+	}
+}
+
+static int write_irda_word_reg(uint32_t addr, uint16_t val)
+{
+	switch (addr) {
+	default:
+		return panic("Attempted write to unsupported IrDA register at 0x%.8x\n", addr);
+	}
+}
+
+static int write_irda_byte_reg(uint32_t addr, uint8_t val)
+{
+	switch (addr) {
+	case IRDA_SCSCR1_OFF:
+		if (val & 0xF0)
+			return panic("Infrared is not supported\n");
+		return 0;
+	default:
+		return panic("Attempted write to unsupported IrDA register at 0x%.8x\n", addr);
+	}
+}
+
+/*
  * The registers for the Serial Communication Interface are accessed at address
  * range 0xA4000150-0xA4000160, which is actually in the P2 area so the top 3
  * bits are ignored.
@@ -5209,6 +5288,8 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 			return panic("Bad width (8) for read from BSC\n");
 		if (is_scif_byte_address(addr))
 			return read_scif_byte_reg(addr, val_p);
+		if (is_irda_byte_address(addr))
+			return read_irda_byte_reg(addr, val_p);
 		if (is_scif_word_address(addr))
 			return panic("Bad width (8) for read from SCIF word\n");
 		if (is_adconv_byte_address(addr))
@@ -5285,6 +5366,8 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 			return panic("Bad width (16) for read from SCIF byte\n");
 		if (is_scif_word_address(addr))
 			return read_scif_word_reg(addr, val_p);
+		if (is_irda_word_address(addr))
+			return read_irda_word_reg(addr, val_p);
 		if (is_cpg_word_address(addr))
 			return cpg_read_word_reg(addr, val_p);
 		break;
@@ -5428,6 +5511,8 @@ static int write_byte(uint32_t addr, uint8_t val)
 			return panic("Bad width (8) for write to PFC\n");
 		if (is_scif_byte_address(addr))
 			return write_scif_byte_reg(addr, val);
+		if (is_irda_byte_address(addr))
+			return write_irda_byte_reg(addr, val);
 		if (is_scif_word_address(addr))
 			return panic("Bad width (8) for write to SCIF word\n");
 		if (is_adconv_byte_address(addr))
@@ -5517,6 +5602,8 @@ static int write_word(uint32_t addr, uint16_t val)
 			return panic("Bad width (16) for write to SCIF byte\n");
 		if (is_scif_word_address(addr))
 			return write_scif_word_reg(addr, val);
+		if (is_irda_word_address(addr))
+			return write_irda_word_reg(addr, val);
 		if (is_dmac_word_address(addr))
 			return dmac_write_word_reg(addr, val);
 		if (is_cpg_word_address(addr))
