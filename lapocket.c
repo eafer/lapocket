@@ -6084,6 +6084,7 @@ static int execute(uint32_t pc);
 #define INSN_N_STSMACH				0x000A
 #define INSN_NM_MOVWL0				0x000D
 #define INSN_NM_MOVLL0				0x000E
+#define INSN_0_SETT					0x0018
 #define INSN_0_DIV0U				0x0019
 #define INSN_0_SLEEP				0x001B
 #define INSN_N_STSMACL				0x001A
@@ -6256,6 +6257,10 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 		}
 		cpu.SR = cpu.SSR;
 		return prepare_delayed_slot(cpu.SPC + 4);
+	case INSN_0_SETT:
+		cpu.SR |= SR_T_BIT;
+		cpu.PC += 2;
+		return 0;
 	case INSN_0_DIV0U:
 		cpu.SR &= ~(SR_T_BIT | SR_Q_BIT | SR_M_BIT);
 		cpu.PC += 2;
@@ -7603,6 +7608,9 @@ static void disassemble_0_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_0_RTE:
 		printf("RTE\n");
+		return;
+	case INSN_0_SETT:
+		printf("SETT\n");
 		return;
 	case INSN_0_DIV0U:
 		printf("DIV0U\n");
