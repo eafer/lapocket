@@ -1785,10 +1785,9 @@ enum eeprom_state {
 };
 
 /*
- * So far I've only encountered pages 0 and 3 of EEPROM. I don't know how many
- * exist (TODO)...
+ * The EEPROM has 256 bytes of memory.
  */
-#define EEPROM_SIZE					0xC0
+#define EEPROM_SIZE					0x0100
 #define EEPROM_PAGE_SIZE			0x40
 #define EEPROM_PAGE_SHIFT			6
 #define EEPROM_FIRMWARE_CONFIG_OFF	(0 * EEPROM_PAGE_SIZE)
@@ -1801,8 +1800,6 @@ struct eeprom {
 
 	/* Actual memory */
 	uint8_t mem[EEPROM_SIZE];
-	uint8_t	fc;
-	uint8_t fd;
 
 	enum eeprom_state state;
 
@@ -1909,17 +1906,6 @@ static void eeprom_monitor_save_condition(bool is_start)
 	eeprom_monitor_save_str(is_start ? ">>>" : "|||");
 }
 
-static bool eeprom_is_valid_address(uint8_t addr)
-{
-	if (EEPROM_PAGE(addr) == 0)
-		return true;
-	if (EEPROM_PAGE(addr) == 2)
-		return true;
-	if (addr == 0xfc || addr == 0xfd)
-		return true;
-	return false;
-}
-
 static int eeprom_start(void)
 {
 	eeprom_monitor_save_condition(true /* is_start */);
@@ -1952,18 +1938,8 @@ static int eeprom_write_to_pointer(uint8_t val)
 	uint8_t ptr;
 
 	ptr = eeprom.ptr;
-	if (!eeprom_is_valid_address(ptr))
-		return panic("BUG: Out of bounds EEPROM pointer\n");
-	switch (ptr) {
-	case 0xfc:
-		eeprom.fc = val;
-		break;
-	case 0xfd:
-		eeprom.fd = val;
-		break;
-	default:
-		eeprom.mem[ptr] = val;
-	}
+	eeprom.mem[ptr] = val;
+
 	/* Only one write at a time, it seems */
 	eeprom.state = EEPROM_DONE;
 	return 0;
@@ -1978,8 +1954,6 @@ static int eeprom_deliver_frame(uint8_t frame)
 	case EEPROM_STOPPED:
 		return panic("BUG: EEPROM received frame while stopped\n");
 	case EEPROM_UPDATING_POINTER:
-		if (!eeprom_is_valid_address(frame))
-			return panic("Setting EEPROM pointer out of bounds (ptr: 0x%.2x)\n", frame);
 		eeprom.ptr = frame;
 		eeprom.state = EEPROM_WRITING_TO_POINTER;
 		return 0;
@@ -2007,18 +1981,7 @@ static int eeprom_read_from_pointer(uint8_t *val_p)
 	uint8_t ptr, val;
 
 	ptr = eeprom.ptr;
-	if (!eeprom_is_valid_address(ptr))
-		return panic("BUG: Out of bounds EEPROM pointer\n");
-	switch (ptr) {
-	case 0xfc:
-		val = eeprom.fc;
-		break;
-	case 0xfd:
-		val = eeprom.fd;
-		break;
-	default:
-		val = eeprom.mem[ptr];
-	}
+	val = eeprom.mem[ptr];
 
 	/* Only one write at a time, it seems */
 	eeprom.state = EEPROM_DONE;
@@ -6044,21 +6007,21 @@ static void init_eeprom(void)
 	 * page zero should be at 0xac002800 and page 2 at 0xac002840 in physical
 	 * hardware (TODO).
 	 */
-	for (i = 0; i < EEPROM_SIZE - 4; ++i)
+	for (i = 0; i < EEPROM_SIZE; ++i)
 		eeprom.mem[i] = 0xff - i;
 	/*
 	 * The last word of the os configuration must be like this or else the
 	 * firmware configuration doesn't get read. I don't know much about this
 	 * yet.
 	 */
-	eeprom.mem[EEPROM_SIZE - 4] = 0xA0;
-	eeprom.mem[EEPROM_SIZE - 3] = 0xA5;
+	eeprom.mem[EEPROM_OS_CONFIG_OFF + EEPROM_PAGE_SIZE - 4] = 0xA0;
+	eeprom.mem[EEPROM_OS_CONFIG_OFF + EEPROM_PAGE_SIZE - 3] = 0xA5;
 	/* The last two bytes are a checksum. See <0x800300A8> fo details. */
-	eeprom.mem[EEPROM_SIZE - 2] = 0x4b;
-	eeprom.mem[EEPROM_SIZE - 1] = 0xbb;
+	eeprom.mem[EEPROM_OS_CONFIG_OFF + EEPROM_PAGE_SIZE - 2] = 0x4b;
+	eeprom.mem[EEPROM_OS_CONFIG_OFF + EEPROM_PAGE_SIZE - 1] = 0xbb;
 
-	eeprom.fc = 0xA2;
-	eeprom.fd = 0x7C;
+	eeprom.mem[0xfc] = 0xA2;
+	eeprom.mem[0xfd] = 0x7C;
 
 	eeprom.state = EEPROM_STOPPED;
 }
