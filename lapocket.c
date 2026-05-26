@@ -6111,14 +6111,17 @@ static int execute(uint32_t pc);
 #define INSN_N_STSMACH				0x000A
 #define INSN_NM_MOVWL0				0x000D
 #define INSN_NM_MOVLL0				0x000E
+#define INSN_NM_MACL				0x000F
 #define INSN_0_SETT					0x0018
 #define INSN_0_DIV0U				0x0019
 #define INSN_0_SLEEP				0x001B
 #define INSN_N_STSMACL				0x001A
 #define INSN_N_MOVT					0x0029
 #define INSN_0_RTS					0x000B
+#define INSN_0_CLRMAC				0x0028
 #define INSN_0_RTE					0x002B
 #define INSN_0_LDTLB				0x0038
+#define INSN_0_CLRS					0x0048
 #define INSN_NM_MOVBL0				0x000C
 #define INSN_M_BRAF_RM				0x0023
 #define INSN_MOVL_RM_TO_AT_DISP_RN	0x1000
@@ -6272,6 +6275,11 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 			return panic("Invalid delay slot! (TODO)\n");
 		backtrace_pop();
 		return prepare_delayed_slot(cpu.PR + 4);
+	case INSN_0_CLRMAC:
+		cpu.MACH = 0;
+		cpu.MACL = 0;
+		cpu.PC += 2;
+		return 0;
 	case INSN_0_RTE:
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
 			return panic("Invalid delay slot! (TODO)\n");
@@ -6305,6 +6313,10 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 	case INSN_0_LDTLB:
 		if (mmu_load_pte_to_tlb())
 			return 1;
+		cpu.PC += 2;
+		return 0;
+	case INSN_0_CLRS:
+		cpu.SR &= ~SR_S_BIT;
 		cpu.PC += 2;
 		return 0;
 	}
@@ -6898,9 +6910,11 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 	uint32_t nval, mval, src_addr, shift_cnt;
 	bool tbit, qbit, mbit;
 	uint64_t tmp64;
+	int64_t tmp64_s;
 	uint8_t data8;
 	uint16_t data16;
-	uint32_t data32;
+	uint32_t data32, data32b;
+	uint64_t mac;
 
 	switch (insn & 0xF00F) {
 	case INSN_NM_MOVBS0:
@@ -6941,6 +6955,26 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		if (read_longword(read_gp_register(0) + mval, &data32))
 			return 1;
 		write_gp_register(n, data32);
+		cpu.PC += 2;
+		return 0;
+	case INSN_NM_MACL:
+		if (cpu.SR & SR_S_BIT)
+			return panic("MACL with saturation\n");
+		mval = read_gp_register(m);
+		nval = read_gp_register(n);
+		if (read_longword(mval, &data32))
+			return 1;
+		if (read_longword(nval, &data32b))
+			return 1;
+		/* TODO: rely less on undefined behaviour... */
+		tmp64_s = (int32_t)data32;
+		tmp64_s *= (int32_t)data32b;
+		mac = cpu.MACL + ((uint64_t)cpu.MACH << 32);
+		mac += tmp64_s;
+		cpu.MACL = mac;
+		cpu.MACH = mac >> 32;
+		write_gp_register(m, mval + 4);
+		write_gp_register(n, nval + 4);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_MOVBL0:
@@ -7486,6 +7520,7 @@ static int execute_0uuu_format(uint32_t pc, uint16_t insn)
 	case 0x000C:
 	case 0x000D:
 	case 0x000E:
+	case 0x000F:
 		return execute_nm_format(pc, insn);
 	default:
 		/*
@@ -7633,6 +7668,9 @@ static void disassemble_0_format(uint32_t pc, uint16_t insn)
 	case INSN_0_RTS:
 		printf("RTS\n");
 		return;
+	case INSN_0_CLRMAC:
+		printf("CLRMAC\n");
+		return;
 	case INSN_0_RTE:
 		printf("RTE\n");
 		return;
@@ -7647,6 +7685,9 @@ static void disassemble_0_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_0_LDTLB:
 		printf("LDTLB\n");
+		return;
+	case INSN_0_CLRS:
+		printf("CLRS\n");
 		return;
 	}
 	printf("0 format instruction 0x%x not implemented\n", insn);
@@ -7939,6 +7980,9 @@ static void disassemble_nm_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_NM_MOVLL0:
 		printf("MOV.L @(R0,R%u),R%u\n", m, n);
+		return;
+	case INSN_NM_MACL:
+		printf("MACL.L @R%u+,@R%u+\n", m, n);
 		return;
 	case INSN_NM_MOVBL0:
 		printf("MOV.B @(R0,R%u),R%u\n", m, n);
@@ -8241,6 +8285,7 @@ static void disassemble_0uuu_format(uint32_t pc, uint16_t insn)
 	case 0x000C:
 	case 0x000D:
 	case 0x000E:
+	case 0x000F:
 		return disassemble_nm_format(pc, insn);
 	default:
 		printf("0uuu instruction 0x%x not implemented\n", insn);
