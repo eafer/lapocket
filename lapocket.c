@@ -6199,6 +6199,7 @@ static int execute(uint32_t pc);
 #define INSN_NM_MOVW_ATRN_RM		0x2001 /* TODO: fix older names like this */
 #define INSN_NM_MOVL_RM_ATRN		0x2002
 #define INSN_NM_MOVBM				0x2004
+#define INSN_NM_MOVWM				0x2005
 #define INSN_NM_MOVL_RM_AT_MINUS_RN	0x2006
 #define INSN_NM_DIV0S				0x2007
 #define INSN_NM_TST_RM_RN			0x2008
@@ -7219,6 +7220,13 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		write_gp_register(n, nval);
 		cpu.PC += 2;
 		return 0;
+	case INSN_NM_MOVWM:
+		nval = read_gp_register(n) - 2;
+		if (write_word(nval, read_gp_register(m)))
+			return 1;
+		write_gp_register(n, nval);
+		cpu.PC += 2;
+		return 0;
 	case INSN_NM_MOVL_RM_AT_MINUS_RN:
 		nval = read_gp_register(n) - 4;
 		if (write_longword(nval, read_gp_register(m)))
@@ -8122,6 +8130,9 @@ static void disassemble_nm_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_NM_MOVBM:
 		printf("MOV.B R%u,@-R%u\n", m, n);
+		return;
+	case INSN_NM_MOVWM:
+		printf("MOV.W R%u,@-R%u\n", m, n);
 		return;
 	case INSN_NM_MOVL_RM_AT_MINUS_RN:
 		printf("MOV.L R%u,@-R%u\n", m, n);
