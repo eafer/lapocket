@@ -2518,6 +2518,8 @@ static int pfc_write_word_reg(uint32_t addr, uint16_t val)
 			if ((val & PFC_PJ5_MASK) == PFC_PJ5MD0) {
 				if (ioports.PJDR & 0x20)
 					cfcard_reset();
+			} else if ((val & PFC_PJ5_MASK) == (PFC_PJ5MD0 | PFC_PJ5MD1)) {
+				notice("Unknown pin PJ5 set to input with pullup off\n");
 			} else {
 				return panic("Unsupported PJ5 configuration 0x%.4x\n", val);
 			}
