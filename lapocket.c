@@ -4291,6 +4291,16 @@ struct breakpoints {
 	bool hit;
 } breakpoints = {0};
 
+#define MAX_WATCHPOINTS	128
+
+struct watchpoints {
+	/* List of addresses to watch */
+	int addr_count;
+	uint32_t addrs[MAX_BREAKPOINTS];
+
+	bool hit;
+} watchpoints = {0};
+
 struct vm_mapping {
 	uint32_t virt;
 	uint32_t phys;
@@ -5504,6 +5514,8 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 	return panic("Attempted read of unknown address 0x%.8x\n", addr);
 }
 
+static bool addr_is_watchpoint(uint32_t addr);
+
 static int write_byte(uint32_t addr, uint8_t val)
 {
 	uint32_t pa;
@@ -5513,6 +5525,8 @@ static int write_byte(uint32_t addr, uint8_t val)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
+	if (addr_is_watchpoint(addr))
+		return 1;
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
@@ -5600,6 +5614,8 @@ static int write_word(uint32_t addr, uint16_t val)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
+	if (addr_is_watchpoint(addr))
+		return 1;
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
@@ -5687,6 +5703,8 @@ static int write_longword(uint32_t addr, uint32_t val)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
+	if (addr_is_watchpoint(addr))
+		return 1;
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
@@ -8689,6 +8707,32 @@ static bool pc_is_breakpoint(uint32_t pc)
 	return false;
 }
 
+static bool addr_is_watchpoint(uint32_t addr)
+{
+	int i;
+
+	/* Watchpoints make no sense for memory inspection with the debugger */
+	if (!running)
+		return false;
+
+	/*
+	 * Don't keep breaking in the same place. TODO: this seems to break down
+	 * with interrupts sometimes.
+	 */
+	if (watchpoints.hit) {
+		watchpoints.hit = false;
+		return false;
+	}
+
+	for (i = 0; i < watchpoints.addr_count; ++i) {
+		if (addr == watchpoints.addrs[i]) {
+			watchpoints.hit = true;
+			return true;
+		}
+	}
+	return false;
+}
+
 static void become_interactive(void)
 {
 	interactive = true;
@@ -8960,6 +9004,10 @@ static int run(int steps)
 				become_interactive();
 				break;
 			}
+			if (ret && watchpoints.hit) {
+				ret = 0;
+				break;
+			}
 			if (delayed_slot) {
 				if (cpu.extra_state & EXTRA_EXCEPTION) {
 					/*
@@ -9196,6 +9244,32 @@ static int break_command_handler(int argc, const char **argv)
 		return CLI_CONTINUE;
 	}
 	breakpoints.pcs[breakpoints.pcs_count++] = pc;
+	return CLI_CONTINUE;
+}
+
+static int watch_command_handler(int argc, const char **argv)
+{
+	uint32_t addr;
+	char *endptr = NULL;
+	unsigned long tmp;
+
+	if (argc != 2) {
+		printf("Invalid watch command\n");
+		return CLI_CONTINUE;
+	}
+
+	tmp = strtoul(argv[1], &endptr, 0);
+	if (*endptr != '\0' || tmp == ULONG_MAX) {
+		printf("Bad number \"%s\"\n", argv[1]);
+		return CLI_CONTINUE;
+	}
+	addr = tmp;
+
+	if (watchpoints.addr_count == MAX_WATCHPOINTS) {
+		printf("Watchpoint limit reached\n");
+		return CLI_CONTINUE;
+	}
+	watchpoints.addrs[watchpoints.addr_count++] = addr;
 	return CLI_CONTINUE;
 }
 
@@ -10091,6 +10165,7 @@ struct shell_command shell_command_list[] = {
 	{"set", "set register_name [+|-]value", set_command_handler},
 	{"step", "step [count]", step_command_handler},
 	{"stop", "stop", stop_command_handler},
+	{"watch", "watch address", watch_command_handler},
 	{"xxd", "xxd [address] length", xxd_command_handler},
 };
 
