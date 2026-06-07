@@ -6208,6 +6208,7 @@ static int execute(uint32_t pc);
 #define INSN_NM_OR_RM_RN			0x200B
 #define INSN_NM_CMPSTR				0x200C
 #define INSN_NM_XTRCT				0x200D
+#define INSN_NM_MULU				0x200E
 #define INSN_NM_CMPEQ_RM_RN			0x3000
 #define INSN_NM_CMPHS				0x3002
 #define INSN_NM_CMPGE				0x3003
@@ -7076,6 +7077,12 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		nval = read_gp_register(n);
 		mval = read_gp_register(m);
 		write_gp_register(n, (nval >> 16) | (mval << 16));
+		cpu.PC += 2;
+		return 0;
+	case INSN_NM_MULU:
+		nval = read_gp_register(n) & 0x0000FFFF;
+		mval = read_gp_register(m) & 0x0000FFFF;
+		cpu.MACL = nval * mval;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_CMPEQ_RM_RN:
@@ -8076,6 +8083,9 @@ static void disassemble_nm_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_NM_XTRCT:
 		printf("XTRCT R%u,R%u\n", m, n);
+		return;
+	case INSN_NM_MULU:
+		printf("MULU.W R%u,R%u\n", m, n);
 		return;
 	case INSN_NM_CMPEQ_RM_RN:
 		printf("CMP/EQ R%u,R%u\n", m, n);
