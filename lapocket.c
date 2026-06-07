@@ -6192,6 +6192,7 @@ static int execute(uint32_t pc);
 #define INSN_0_RTE					0x002B
 #define INSN_0_LDTLB				0x0038
 #define INSN_0_CLRS					0x0048
+#define INSN_N_STCRm_BANK			0x0082
 #define INSN_NM_MOVBL0				0x000C
 #define INSN_M_BRAF_RM				0x0023
 #define INSN_MOVL_RM_TO_AT_DISP_RN	0x1000
@@ -6265,6 +6266,7 @@ static int execute(uint32_t pc);
 #define INSN_M_LDCMSPC				0x4047
 #define INSN_M_LDCSPC				0x404E
 #define INSN_N_STCMRm				0x4083
+#define INSN_M_LDCMRn_BANK			0x4087
 #define INSN_M_LDCRn_BANK			0x408E
 #define INSN_M_LDCR1_BANK			0x409E
 #define INSN_M_LDCR2_BANK			0x40AE
@@ -6693,6 +6695,12 @@ static int execute_n_format(uint32_t pc, uint16_t insn)
 			cpu.PC += 2;
 			return 0;
 		}
+		if ((insn & 0xF08F) == INSN_N_STCRm_BANK) {
+			bankreg = (insn & 0x0070U) >> 4;
+			write_gp_register(n, read_gp_register_bank(bankreg));
+			cpu.PC += 2;
+			return 0;
+		}
 		break;
 	}
 	return panic("N format instruction 0x%x not implemented\n", insn);
@@ -6852,6 +6860,16 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		if ((insn & 0xF08F) == INSN_M_LDCRn_BANK) {
 			bankreg = (insn & 0x0070U) >> 4;
 			write_gp_register_bank(bankreg, read_gp_register(m));
+			cpu.PC += 2;
+			return 0;
+		}
+		if ((insn & 0xF08F) == INSN_M_LDCMRn_BANK) {
+			bankreg = (insn & 0x0070U) >> 4;
+			mval = read_gp_register(m);
+			if (read_longword(mval, &data32))
+				return 1;
+			write_gp_register_bank(bankreg, data32);
+			write_gp_register(m, mval + 4);
 			cpu.PC += 2;
 			return 0;
 		}
@@ -7931,6 +7949,11 @@ static void disassemble_n_format(uint32_t pc, uint16_t insn)
 			printf("STC.L R%u_BANK,@-R%u\n", bankreg, n);
 			return;
 		}
+		if ((insn & 0xF08F) == INSN_N_STCRm_BANK) {
+			bankreg = (insn & 0x0070U) >> 4;
+			printf("STC R%u_BANK,R%u\n", bankreg, n);
+			return;
+		}
 		printf("N format instruction 0x%x not implemented\n", insn);
 		return;
 	}
@@ -8004,6 +8027,11 @@ static void disassemble_m_format(uint32_t pc, uint16_t insn)
 		if ((insn & 0xF08F) == INSN_M_LDCRn_BANK) {
 			bankreg = (insn & 0x0070U) >> 4;
 			printf("LDC R%u,R%u_BANK\n", m, bankreg);
+			return;
+		}
+		if ((insn & 0xF08F) == INSN_M_LDCMRn_BANK) {
+			bankreg = (insn & 0x0070U) >> 4;
+			printf("LDC.L @R%u+,R%u_BANK\n", m, bankreg);
 			return;
 		}
 		printf("M format instruction 0x%x not implemented\n", insn);
