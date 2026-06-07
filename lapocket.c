@@ -3100,6 +3100,38 @@ static int xB3A_read_byte_reg(uint32_t addr, uint8_t *val_p)
 #define DMAC_CMCNT0_OFF			0x04000074
 #define DMAC_CMCNT1_OFF			0x04000076
 
+struct dmac {
+	uint32_t SAR0;		/* DMA source address register 0 */
+	uint32_t DAR0;		/* DMA destination address register 0 */
+	uint32_t DMATCR0;	/* DMA transfer count register 0 */
+	uint32_t CHCR0;		/* DMA channel control register 0 */
+	uint16_t DMAOR;		/* DMA operation register */
+} dmac = {0};
+
+/* Flags of the CHCR0-3 registers */
+#define CHCR_DI		(1U << 20)	/* Direct/Indirect Selection */
+#define CHCR_RO		(1U << 19)	/* Source Address Reload Bit */
+#define CHCR_RL		(1U << 18)	/* Request Check Level Bit */
+#define CHCR_AM		(1U << 17)	/* Acknowledge Mode Bit */
+#define CHCR_AL		(1U << 16)	/* Acknowledge Level */
+#define CHCR_DM		(3U << 14)	/* Destination Address Mode Bits */
+#define CHCR_SM		(3U << 12)	/* Source Address Mode Bits */
+#define CHCR_RS		(15U << 8)	/* Resource Select Bits */
+#define CHCR_DS		(1U << 6)	/* DREQ Select Bit */
+#define CHCR_TM		(1U << 5)	/* Transmit Mode */
+#define CHCR_TS		(3U << 3)	/* Transmit Size Bits */
+#define CHCR_IE		(1U << 2)	/* Interrupt Enable Bit */
+#define CHCR_TE		(1U << 1)	/* Transfer End Bit */
+#define CHCR_DE		(1U << 0)	/* DMAC Enable Bit */
+#define CHCR_BIT_MASK	(CHCR_DI | CHCR_RO | CHCR_RL | CHCR_AM | CHCR_AL | CHCR_DM | CHCR_SM | CHCR_RS | CHCR_DS | CHCR_TM | CHCR_TS | CHCR_IE | CHCR_TE | CHCR_DE)
+
+/* Flags of the DMAOR register */
+#define DMAOR_PR1	(1U << 9)	/* Priority Mode Bit 1 */
+#define DMAOR_PR0	(1U << 8)	/* Priority Mode Bit 0 */
+#define DMAOR_AE	(1U << 2)	/* Address Error Flag Bit */
+#define DMAOR_NMIF	(1U << 1)	/* NMI Flag Bit */
+#define DMAOR_DME	(1U << 0)	/* DMA Master Enable Bit */
+
 /* TODO: the manual says that these fields can be accessed with other sizes */
 static bool is_dmac_word_address(uint32_t addr)
 {
@@ -3142,13 +3174,24 @@ static bool is_dmac_longword_address(uint32_t addr)
 	}
 }
 
+static int dmac_read_word_reg(uint32_t addr, uint16_t *val_p)
+{
+	switch (addr) {
+	case DMAC_DMAOR_OFF:
+		*val_p = dmac.DMAOR;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported DMAC register at 0x%.8x\n", addr);
+	}
+}
+
 static int dmac_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
 	case DMAC_DMAOR_OFF:
-		if (val)
-			return panic("Setting DMAC operation register (0x%.2x)\n", val);
-		/* This just means "disable DMA transfers on all channels" */
+		if (val & ~DMAOR_DME)
+			return panic("Unsupported DMAC transfer mode 0x%.4x\n", val);
+		dmac.DMAOR = val;
 		return 0;
 	case DMAC_CMSTR_OFF:
 		if (val)
@@ -3163,6 +3206,8 @@ static int dmac_read_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
 	case DMAC_CHCR0_OFF:
+		*val_p = dmac.CHCR0;
+		return 0;
 	case DMAC_CHCR2_OFF:
 		*val_p = 0;
 		return 0;
@@ -3174,10 +3219,36 @@ static int dmac_read_longword_reg(uint32_t addr, uint32_t *val_p)
 static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 {
 	switch (addr) {
+	case DMAC_SAR0_OFF:
+		dmac.SAR0 = val;
+		notice("DMA source address register 0 set to 0x%.8x\n", val);
+		return 0;
+	case DMAC_DAR0_OFF:
+		dmac.DAR0 = val;
+		notice("DMA destination address register 0 set to 0x%.8x\n", val);
+		return 0;
+	case DMAC_DMATCR0_OFF:
+		if (val & 0xFF000000)
+			return panic("Attempted write to upper 8 bits of DMATCR (0x%.8x)\n", val);
+		dmac.DMATCR0 = val;
+		notice("DMA transfer count register 0 set to 0x%.8x\n", val);
+		return 0;
 	case DMAC_CHCR0_OFF:
+		if (val & ~CHCR_BIT_MASK)
+			return panic("Attempted write to reserved bits of CHCR0 (0x%.8x)\n", val);
+		if (val & CHCR_DI)
+			return panic("Attempted setting of DI bit for DMA channel 0 (0x%.8x)\n", val);
+		if (val & CHCR_RO)
+			return panic("Attempted setting of RO bit for DMA channel 0 (0x%.8x)\n", val);
+		if (val & CHCR_RS)
+			return panic("Unsupported DMAC resource select bits (0x%.8x)\n", val);
+		if (val & CHCR_TE)
+			return panic("Attempt to set a DMAC transfer end bit\n");
+		dmac.CHCR0 = val;
+		return 0;
 	case DMAC_CHCR2_OFF:
 		if (val)
-			return panic("DMAC not supported (0x%.2x)\n", val);
+			return panic("DMAC channel 2 not supported (0x%.2x)\n", val);
 		return 0;
 	default:
 		return panic("Attempted write to unsupported DMAC register at 0x%.8x\n", addr);
@@ -4744,18 +4815,11 @@ static int pdm_write_byte_reg(uint32_t addr, uint8_t val)
 		if (val & STBCR2_MDCHG)
 			return panic("Unsupported power-down mode (0x%.2x)\n", val);
 		/*
-		 * I guess the DMAC isn't used, so one less thing to worry about.
-		 * Nothing needs to be done here but print a notice just in case.
-		 */
-		if (val & STBCR2_MSTP7)
-			notice("Clock supply to DMAC is halted\n");
-		else
-			return panic("Started clock supply to unsupported DMAC\n");
-		/*
 		 * It seems that all these other clocks also get stopped later. TODO:
 		 * maybe don't let these components work while their clock is stopped.
 		 */
 		notice("Clock supply to UBC is %s\n", val & STBCR2_MSTP8 ? "halted" : "running");
+		notice("Clock supply to DMAC is %s\n", val & STBCR2_MSTP7 ? "halted" : "running");
 		notice("Clock supply to DAC is %s\n", val & STBCR2_MSTP6 ? "halted" : "running");
 		notice("Clock supply to ADC is %s\n", val & STBCR2_MSTP5 ? "halted" : "running");
 		notice("Clock supply to SCIF is %s\n", val & STBCR2_MSTP4 ? "halted" : "running");
@@ -5358,6 +5422,8 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 			return read_scif_word_reg(addr, val_p);
 		if (is_irda_word_address(addr))
 			return read_irda_word_reg(addr, val_p);
+		if (is_dmac_word_address(addr))
+			return dmac_read_word_reg(addr, val_p);
 		if (is_cpg_word_address(addr))
 			return cpg_read_word_reg(addr, val_p);
 		break;
