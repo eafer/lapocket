@@ -170,6 +170,8 @@ static bool is_motherboard_word_address(uint32_t addr)
 	case 0x12000044:
 	case 0x12000068:
 	case 0x1200006c:
+	case 0x12000080:
+	case 0x12000084:
 	case 0x12000098:
 		return true;
 	default:
@@ -1759,6 +1761,8 @@ static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 	case 0x12000068:
 	case 0x12000014:
 	case 0x12000044:
+	case 0x12000080:
+	case 0x12000084:
 	case 0x12000098:
 		/* No idea about these but keep going for now (TODO) */
 	case 0x12000000:
