@@ -817,6 +817,8 @@ struct display {
 	/* Framebuffer and display ram. TODO: what is the ram for? Rename this? */
 	uint8_t fb[DISPLAY_RAM_SIZE];
 
+	uint8_t mode;		/* Lots of guesswork here... */
+
 	/* The 256-color palette gets written one byte at a time */
 	uint8_t pal_idx;	/* Palette entry to edit */
 	uint8_t pal_rgb;	/* Color to edit (0-2) */
@@ -1052,6 +1054,13 @@ struct cpu {
 #define DISPLAY_WIDHT_H_OFF		0x14000017	/* Screen width in words (high byte) */
 #define DISPLAY_PAL_IDX_OFF		0x14000024	/* Index of current palette entry */
 #define DISPLAY_PAL_DATA_OFF	0x14000026	/* Write to current palette entry */
+/*
+ * The display sometimes ignores the palette and just outputs the framebuffer
+ * contents as 16-bit pixels. I don't know how to tell what triggers this mode
+ * change; this is a very wild guess so that I have something to test (TODO).
+ */
+#define DISPLAY_MODE_OFF		0x14000001
+#define DISPLAY_BYPASS_PALETTE	0x20
 
 static bool is_display_regs_byte_address(uint32_t addr)
 {
@@ -1068,6 +1077,9 @@ static int display_read_byte_reg(uint32_t addr, uint8_t *val_p)
 	}
 
 	switch (addr) {
+	case DISPLAY_MODE_OFF:
+		*val_p = display.mode;
+		return 0;
 	case DISPLAY_WIDHT_L_OFF:
 		*val_p = (DISPLAY_FB_WIDTH >> 1) & 0x00FF;
 		return 0;
@@ -1093,6 +1105,10 @@ static int display_write_byte_reg(uint32_t addr, uint8_t val)
 	}
 
 	switch (addr) {
+	case DISPLAY_MODE_OFF:
+		notice("Display \"mode\" set to 0x%.2x\n", val);
+		display.mode = val;
+		return 0;
 	case DISPLAY_PAL_IDX_OFF:
 		display.pal_idx = val;
 		display.pal_rgb = 0;
@@ -1118,10 +1134,38 @@ static int display_write_byte_reg(uint32_t addr, uint8_t val)
 	}
 }
 
+static void display_update_output_no_palette(void)
+{
+	uint16_t pixel;
+	uint8_t red, green, blue;
+	int i;
+
+	/*
+	 * Each 16-bit pixel has 5 bits for red, 6 for green, and 5 for blue.
+	 *
+	 * TODO: are all bits actually usable? Some sources say that the actual
+	 * color depth is 12-bit...
+	 * TODO: is there any point in the conversion to 32-bit?
+	 */
+	for (i = 0; i < DISPLAY_FB_SIZE; ++i) {
+		pixel = *(((uint16_t *)display.fb) + i);
+		display.output[i] = 0xFF000000; /* The alpha channel */
+		red = (pixel & 0xf800) >> 11;
+		green = (pixel & 0x07e0) >> 5;
+		blue = (pixel & 0x001f);
+		display.output[i] |= red << (0 + 3);
+		display.output[i] |= green << (8 + 2);
+		display.output[i] |= blue << (16 + 3);
+	}
+}
+
 /* Updates the RGBA output buffer according to framebuffer and palette */
 static void display_update_output(void)
 {
 	int i;
+
+	if (display.mode & DISPLAY_BYPASS_PALETTE)
+		return display_update_output_no_palette();
 
 	for (i = 0; i < DISPLAY_FB_SIZE; ++i)
 		display.output[i] = display.pal[display.fb[i]];
