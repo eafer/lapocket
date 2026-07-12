@@ -4235,10 +4235,32 @@ static bool mmu_asid_is_match(uint32_t tlb_addr)
 
 #define PAGE_MASK	(~((1 << 10) - 1))
 
-static void mmu_dump_tlb(void)
+static bool addr_in_range(uint32_t addr, uint32_t start, uint32_t len)
+{
+	if (addr < start)
+		return false;
+	return addr < start + len;
+}
+
+static int mmu_dump_tlb(int argc, const char **argv)
 {
 	uint32_t tlb_addr, tlb_data;
+	uint32_t va, pa;
 	int way, entry;
+	unsigned long tmp;
+	uint32_t target_addr;
+	char *endptr = NULL;
+	bool dump_all;
+
+	dump_all = argc != 3;
+	if (!dump_all) {
+		tmp = strtoul(argv[2], &endptr, 0);
+		if (*endptr != '\0' || (tmp == ULONG_MAX && errno == ERANGE)) {
+			printf("Bad number \"%s\"\n", argv[2]);
+			return 1;
+		}
+		target_addr = tmp;
+	}
 
 	printf("MAPPING\t\t\tASID\tPROT\tDIRTY\tVALID\tSHARED\n");
 
@@ -4246,8 +4268,15 @@ static void mmu_dump_tlb(void)
 		for (entry = 0; entry < 32; ++entry) {
 			tlb_addr = mmu.tlb_addr[entry][way];
 			tlb_data = mmu.tlb_data[entry][way];
-			printf("0x%.8x", mmu_tlb_to_va(tlb_addr, entry));
-			printf("->0x%.8x", mmu_tlb_to_pa(tlb_data));
+			va = mmu_tlb_to_va(tlb_addr, entry);
+			pa = mmu_tlb_to_pa(tlb_data);
+			if (!dump_all) {
+				/* 1 KiB page size */
+				if (!addr_in_range(target_addr, va, 1024) && !addr_in_range(target_addr, pa, 1024))
+					continue;
+			}
+			printf("0x%.8x", va);
+			printf("->0x%.8x", pa);
 			printf("\t%.2x", mmu_tlb_to_asid(tlb_addr));
 			printf("\t%.2x", mmu_tlb_to_pr(tlb_data));
 			printf("\t%s", tlb_data & TLB_D ? "YES" : "NO");
@@ -4255,6 +4284,7 @@ static void mmu_dump_tlb(void)
 			printf("\t%s\n", tlb_addr & TLB_SH ? "YES" : "NO");
 		}
 	}
+	return 0;
 }
 
 /* TODO: handle overlaps between mmu and debugger mappings */
@@ -9198,18 +9228,24 @@ static int dump_command_handler(int argc, const char **argv)
 		return CLI_CONTINUE;
 	}
 
-	if (argc > 2) {
+	if (argc > 3) {
 		printf("Invalid dump command\n");
 		return CLI_CONTINUE;
 	}
 	sel = argv[1];
 
-	if (strcmp(sel, "cpu") == 0)
+	if (strcmp(sel, "cpu") == 0) {
+		if (argc == 3) {
+			printf("Invalid cpu dump command\n");
+			return CLI_CONTINUE;
+		}
 		dump_cpu();
-	else if (strcmp(sel, "tlb") == 0)
-		mmu_dump_tlb();
-	else
+	} else if (strcmp(sel, "tlb") == 0) {
+		if (mmu_dump_tlb(argc, argv))
+			return CLI_CONTINUE;
+	} else {
 		printf("Unsupported dump selector \"%s\"\n", sel);
+	}
 	return CLI_CONTINUE;
 }
 
@@ -10196,7 +10232,7 @@ struct shell_command shell_command_list[] = {
 	{"break", "break address", break_command_handler},
 	{"crc", "crc card sector", crc_command_handler},
 	{"disas", "disas [[+|-]address [lenght]]", disas_command_handler},
-	{"dump", "dump [cpu|tlb]", dump_command_handler},
+	{"dump", "dump [cpu|tlb [address]]", dump_command_handler},
 	{"exit", "exit", exit_command_handler},
 	{"help", "help [command]", help_command_handler},
 	{"input", "input [button]", input_command_handler},
