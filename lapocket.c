@@ -10278,7 +10278,7 @@ static int help_command_handler(int argc, const char **argv)
 
 #define MAX_ARGC	32
 
-/* Returns CLI_CONTINUE if @line is empty */
+/* Returns 1 if @line is empty */
 static int assemble_argv(char *line, int *argc_p, char **argv)
 {
 	int argc = 0;
