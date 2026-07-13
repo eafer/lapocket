@@ -6,11 +6,6 @@ monitor xb3a off
 # Boot and run until we go to sleep waiting for the user to tap the screen
 break 0x800345da
 
-# There is another sleep instruction before that one and we need to push a
-# button to keep going. This is silly and it needs to be investigated (TODO).
-step 100000000
-input QL1
-
 run
 print CRC
 exit

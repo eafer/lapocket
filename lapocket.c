@@ -9143,7 +9143,6 @@ static int run(int steps)
 				cpu.extra_state &= ~EXTRA_IN_DELAYED;
 				cpu.delayed_pc = 0;
 			}
-			update_clocks();
 			update_scif();
 			update_top_light();
 			if (!forever) {
@@ -9153,6 +9152,8 @@ static int run(int steps)
 				}
 			}
 		}
+		/* TODO: update the clocks on the last step too */
+		update_clocks();
 
 		if (kbinterrupted) {
 			ret = 0;
