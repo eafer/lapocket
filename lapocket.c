@@ -8858,6 +8858,22 @@ static void pint_accept(int i, int priority)
 	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
+/*
+ * Accept a TUNIi interrupt unless its priority is too low for the SR mask.
+ */
+static void tuni_accept(int i, int priority)
+{
+	if (priority <= sr_interrupt_mask())
+		return;
+	cpu.SPC = cpu.PC - 4;
+	cpu.SSR = cpu.SR;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	cpu.PC = cpu.VBR + 0x600 + 4;
+	cpu.INTEVT = 0x400 + i * 0x20;
+	cpu.INTEVT2 = 0x400 + i * 0x20;
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
+}
+
 /* Returns the priority level for IRQi */
 static int irq_priority(int i)
 {
@@ -8882,8 +8898,35 @@ static int pint_priority(int i)
 	return (intc.IPRD >> 8) & 0x000F;
 }
 
+/* Returns the priority level for TUNIi */
+static int tuni_priority(int i)
+{
+	uint16_t reg;
+	int bitoff;
+
+	reg = intc.IPRA;
+	bitoff = 12 - 4 * i;
+	return (reg >> bitoff) & 0x000F;
+}
+
+static bool timer_underflow_interrupted(int *which)
+{
+	int i;
+
+	for (i = 0; i < 3; ++i) {
+		if ((tmu.TCR[i] & TCR_UNIE) && (tmu.TCR[i] & TCR_UNF)) {
+			*which = i;
+			return true;
+		}
+	}
+	*which = -1;
+	return false;
+}
+
 static void interrupt_check(void)
 {
+	int timer_int;
+
 	/* Interrupts only get accepted after the delay slot */
 	if (cpu.extra_state & EXTRA_IN_DELAYED)
 		return;
@@ -8895,7 +8938,8 @@ static void interrupt_check(void)
 	if (!(cpu.extra_state & EXTRA_POWER_DOWN) && (cpu.SR & SR_BL_BIT))
 		return;
 
-	if (!intc.IRR0)
+	timer_int = -1;
+	if (!intc.IRR0 && !timer_underflow_interrupted(&timer_int))
 		return;
 
 	/*
@@ -8921,6 +8965,8 @@ static void interrupt_check(void)
 		return irq_accept(4, irq_priority(4));
 	if (intc.IRR0 & IRR0_PINT1R)
 		return pint_accept(1, pint_priority(1));
+	if (timer_int != -1)
+		return tuni_accept(timer_int, tuni_priority(timer_int));
 }
 
 static void mmu_set_rc(int rc)
