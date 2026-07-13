@@ -1183,6 +1183,8 @@ static void display_update_output(void)
  */
 #define CF_CIS_SIZE		0x16A
 #define CF_CIS_OFF		0x18001800
+/* It seems that CIS can also be accessed at this range */
+#define CF_CIS_OFF_ALT	0x19201800
 const uint8_t cf_cis[] = {
 	/* Offsets 000h to 02Ah (page 6-1) */
 	0x01, 0x04, 0xDF, 0x72, 0x01, 0xFF, 0x1C, 0x04, 0x03, 0xD9, 0x01,
@@ -1242,18 +1244,23 @@ const uint8_t cf_cis[] = {
 
 static bool is_compactflash_cis_byte_address(uint32_t addr)
 {
-	if (addr < CF_CIS_OFF || addr >= CF_CIS_OFF + CF_CIS_SIZE)
-		return false;
 	if (addr & 1)
 		return false;
-	return true;
+	if (addr >= CF_CIS_OFF && addr < CF_CIS_OFF + CF_CIS_SIZE)
+		return true;
+	if (addr >= CF_CIS_OFF_ALT && addr < CF_CIS_OFF_ALT + CF_CIS_SIZE)
+		return true;
+	return false;
 }
 
 static int compactflash_cis_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
-	if (addr < CF_CIS_OFF || addr >= CF_CIS_OFF + CF_CIS_SIZE)
+	if (addr >= CF_CIS_OFF && addr < CF_CIS_OFF + CF_CIS_SIZE)
+		addr -= CF_CIS_OFF;
+	else if (addr >= CF_CIS_OFF_ALT && addr < CF_CIS_OFF_ALT + CF_CIS_SIZE)
+		addr -= CF_CIS_OFF_ALT;
+	else
 		return panic("BUG: Out of bounds CIS offset\n");
-	addr -= CF_CIS_OFF;
 	*val_p = cf_cis[addr >> 1];
 	return 0;
 }
@@ -5402,6 +5409,7 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 	case 0x13000000:
 		return xB3A_read_byte_reg(addr, val_p);
 	case 0x18000000:
+	case 0x19000000:
 	case 0x1A000000:
 		if (is_compactflash_cis_byte_address(addr))
 			return compactflash_cis_read_byte_reg(addr, val_p);
