@@ -2491,9 +2491,12 @@ static int pfc_write_word_reg(uint32_t addr, uint16_t val)
 				return panic("Unsupported PG5 configuration 0x%.4x\n", val);
 		}
 		if ((*reg ^ val) & PFC_PG7_MASK) {
-			if ((val & PFC_PG7_MASK) != (PFC_PG7MD0 | PFC_PG7MD1))
+			if ((val & PFC_PG7_MASK) == (PFC_PG7MD0 | PFC_PG7MD1))
+				notice("Unknown pin PG7 set to input with pullup off\n");
+			else if ((val & PFC_PG7_MASK) == 0)
+				notice("Pin PG7 set to \"IOIS16 input (PCMCIA)\"\n");
+			else
 				return panic("Unsupported PG7 configuration 0x%.4x\n", val);
-			notice("Unknown pin PG7 set to input with pullup off\n");
 		}
 		if ((val & PFC_PG0_MASK) != PFC_PG0MD1)
 			return panic("Unsupported PG0 configuration 0x%.4x\n", val);
