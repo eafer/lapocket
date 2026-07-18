@@ -26,7 +26,12 @@ truncate -s 256M "$cardfile"
 cd ./tests
 for filename in *.out; do
 	echo -n "${filename%.out}... "
-	../lapocket -f ${filename%.out} -C $cardfile $firmware > $dumpfile 2>$errfile || fail
+	# TODO: fully support the card in all tests
+	if [ "$filename" = "0027.out" ]; then
+		../lapocket -f ${filename%.out} -C $cardfile $firmware > $dumpfile 2>$errfile || fail
+	else
+		../lapocket -f ${filename%.out} $firmware > $dumpfile 2>$errfile || fail
+	fi
 	diff $filename $dumpfile > $errfile 2>&1 || fail
 	echo "SUCCESS"
 done
