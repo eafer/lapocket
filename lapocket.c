@@ -439,6 +439,9 @@ static int adconv_read_byte_reg(uint32_t addr, uint8_t *val_p)
 			return 0;
 		}
 		return panic("A/D ADDRD read attempt for wrong channel (%u)\n", channel);
+	case ADCONV_ADCR_OFF:
+		*val_p = adconv.ADCR;
+		return 0;
 	default:
 		return panic("Attempted read of unsupported A/D converter register at 0x%.8x\n", addr);
 	}
