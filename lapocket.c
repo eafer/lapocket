@@ -8621,11 +8621,14 @@ static int tmu_prescaler(int i)
 {
 	int tpsc, result;
 
-	result = 4;
 	tpsc = tmu.TCR[i] & TCR_TPSC;
+	/* TODO: we should actually use the RTC clock here */
+	if (tpsc == 4)
+		return 1;
+
+	result = 4;
 	while (tpsc--)
 		result <<= 2;
-	/* TODO: when prescaler is 4, the RTC should be used... */
 	return result;
 }
 

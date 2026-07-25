@@ -1,0 +1,20 @@
+# Tests that the first pen input is accepted correctly
+
+monitor notice off
+monitor xb3a off
+
+# Boot and run until we go to sleep waiting for the user to tap the screen
+break 0x800345da
+run
+
+# After tapping the screen, clocks will wake us up from sleep several times
+# before the update finally happens
+input pen 10,10
+run
+run
+run
+run
+run
+
+print CRC
+exit
