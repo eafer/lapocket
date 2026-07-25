@@ -1,9 +1,24 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -O3
+SHELL = /bin/bash
+
+PKGCONF_ERR = $(shell pkgconf --about >&/dev/null; echo $$?)
+ifeq ($(PKGCONF_ERR),0)
+  SDL3_ERR = $(shell pkgconf --exists sdl3 >&/dev/null; echo $$?)
+  ifeq ($(SDL3_ERR),0)
+    SDL3_CFLAGS = $(shell pkgconf --cflags sdl3) -DHAVE_SDL
+    SDL3_LIBS = $(shell pkgconf --libs sdl3)
+  else
+    $(info Failed to find sdl3, building headless...)
+  endif
+else
+  $(info Failed to find pkgconf, building headless...)
+endif
+
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -O3 $(SDL3_CFLAGS)
 # TODO: enable unused parameter warning
 
 lapocket: lapocket.c
-	$(CC) $(CFLAGS) -o lapocket lapocket.c
+	$(CC) $(CFLAGS) -o lapocket lapocket.c $(SDL3_LIBS)
 
 clean:
 	rm -rf *.o lapocket

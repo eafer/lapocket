@@ -8,6 +8,12 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
+#ifdef HAVE_SDL
+#define SDL_MAIN_USE_CALLBACKS	1
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#endif
+
 static void eeprom_monitor_dump_all(void);
 struct console_monitor;
 static void console_monitor_dump(struct console_monitor *mon);
@@ -4368,6 +4374,12 @@ char *progname = NULL;
 bool interactive = false;
 FILE *script_file = NULL;
 
+#ifdef HAVE_SDL
+bool headless = false;
+#else
+bool headless = true;
+#endif
+
 #define MAX_BREAKPOINTS	128
 
 struct breakpoints {
@@ -4464,7 +4476,7 @@ static void usage(void)
 
 static int emulate(void);
 
-int main(int argc, char *argv[])
+static int parse_options(int argc, char *argv[])
 {
 	char *fw_name = NULL;
 	FILE *fw_file = NULL;
@@ -4490,6 +4502,8 @@ int main(int argc, char *argv[])
 			if (++i == argc)
 				usage();
 			card_name = argv[i];
+		} else if (strcmp(argv[i], "--headless") == 0) {
+			headless = true;
 		} else if (i == argc - 1) {
 			fw_name = argv[i];
 		} else {
@@ -4545,9 +4559,55 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	return 0;
+}
+
+#ifdef HAVE_SDL
+
+static void reset(void);
+static int run(int steps);
+
+SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
+{
+	if (parse_options(argc, argv))
+		return SDL_APP_FAILURE;
+	set_signal_handlers();
+
+	if (headless)
+		return emulate() ? SDL_APP_FAILURE : SDL_APP_SUCCESS;
+
+	reset();
+	return SDL_APP_CONTINUE;
+}
+
+SDL_AppResult SDL_AppIterate(void *appstate)
+{
+	/* TODO: support keyboard interrupts and everything else */
+	return run(1000) ? SDL_APP_FAILURE : SDL_APP_CONTINUE;
+}
+
+SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
+{
+	if (event->type == SDL_EVENT_QUIT)
+		return SDL_APP_SUCCESS;
+	return SDL_APP_CONTINUE;
+}
+
+void SDL_AppQuit(void *appstate, SDL_AppResult result)
+{
+}
+
+#else
+
+int main(int argc, char *argv[])
+{
+	if (parse_options(argc, argv))
+		return 1;
 	set_signal_handlers();
 	return emulate();
 }
+
+#endif
 
 static uint32_t read_gp_register(int n)
 {
