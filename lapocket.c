@@ -9972,7 +9972,7 @@ static int input_up_handler(int argc, const char **argv)
 }
 
 /* Returns 0 on success, -1 on failure */
-static int touchscreen_read_coordinates(const char *xy)
+static int touchscreen_read_coordinates(const char *xy, int *x_p, int *y_p)
 {
 	int *curr = NULL;
 	int x = -1, y = -1;
@@ -10000,15 +10000,35 @@ static int touchscreen_read_coordinates(const char *xy)
 	if (xy[i] != '\0' || x < 0 || y < 0)
 		return -1;
 
+	*x_p = x;
+	*y_p = y;
+	return 0;
+}
+
+static void pen_update(int x, int y)
+{
+	enum pin_sense_mode mode;
+
 	touchscreen.x = x;
 	touchscreen.y = y;
-	return 0;
+
+	/* The only mode in the selftests, but surely others will show up (TODO) */
+	mode = button_to_mode(BUTTON_PEN);
+	if (mode != rising) {
+		(void)panic("Unsupported sense mode for touchscreen interrupts (%u)\n", mode);
+		return;
+	}
+
+	if (touchscreen.x == -1)
+		return;
+	intc.IRR0 |= IRR0_IRQ3R;
+	return;
 }
 
 static int input_pen_handler(int argc, const char **argv)
 {
 	const char *pos = NULL;
-	enum pin_sense_mode mode;
+	int x, y;
 
 	if (argc != 2) {
 		printf("Invalid pen input: coordinates missing\n");
@@ -10016,24 +10036,12 @@ static int input_pen_handler(int argc, const char **argv)
 	}
 
 	pos = argv[1];
-	if (strcmp(pos, "up") == 0) {
-		touchscreen.x = -1;
-		touchscreen.y = -1;
-	} else if (touchscreen_read_coordinates(pos)) {
+	if (strcmp(pos, "up") == 0)
+		pen_update(-1, -1);
+	else if (touchscreen_read_coordinates(pos, &x, &y) == 0)
+		pen_update(x, y);
+	else
 		printf("Invalid pen input \"%s\"\n", pos);
-		return CLI_CONTINUE;
-	}
-
-	/* The only mode in the selftests, but surely others will show up (TODO) */
-	mode = button_to_mode(BUTTON_PEN);
-	if (mode != rising) {
-		(void)panic("Unsupported sense mode for touchscreen interrupts (%u)\n", mode);
-		return CLI_CONTINUE;
-	}
-
-	if (touchscreen.x == -1)
-		return CLI_CONTINUE;
-	intc.IRR0 |= IRR0_IRQ3R;
 	return CLI_CONTINUE;
 }
 
