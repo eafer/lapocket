@@ -8974,11 +8974,9 @@ static uint32_t priority_to_intevt(int priority)
 	return 0x3C0 - (priority - 1) * 0x20;
 }
 
-/* Accept an IRQi interrupt, unless its priority is too low for the SR mask */
+/* Accept an IRQi interrupt */
 static void irq_accept(int i, int priority)
 {
-	if (priority <= sr_interrupt_mask())
-		return;
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
@@ -8988,14 +8986,9 @@ static void irq_accept(int i, int priority)
 	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
-/*
- * Accept an interrupt among PINT0-7 (if i == 0) of PINT8-15 (if i == 1),
- * unless its priority is too low for the SR mask.
- */
+/* Accept an interrupt among PINT0-7 (if i == 0) of PINT8-15 (if i == 1) */
 static void pint_accept(int i, int priority)
 {
-	if (priority <= sr_interrupt_mask())
-		return;
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
@@ -9005,13 +8998,9 @@ static void pint_accept(int i, int priority)
 	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
-/*
- * Accept a TUNIi interrupt unless its priority is too low for the SR mask.
- */
+/* Accept a TUNIi interrupt */
 static void tuni_accept(int i, int priority)
 {
-	if (priority <= sr_interrupt_mask())
-		return;
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
@@ -9056,24 +9045,79 @@ static int tuni_priority(int i)
 	return (reg >> bitoff) & 0x000F;
 }
 
-static bool timer_underflow_interrupted(int *which)
+static bool timer_underflow_interrupted(void)
 {
 	int i;
 
 	for (i = 0; i < 3; ++i) {
-		if ((tmu.TCR[i] & TCR_UNIE) && (tmu.TCR[i] & TCR_UNF)) {
-			*which = i;
+		if ((tmu.TCR[i] & TCR_UNIE) && (tmu.TCR[i] & TCR_UNF))
 			return true;
+	}
+	return false;
+}
+
+/* Accept the highest priority interrupt unless it's too low for the SR mask */
+static void interrupt_accept(void)
+{
+	int max_priority, curr_priority, max_num;
+	void (*accept_fn)(int, int);
+	int i;
+
+	max_priority = -1;
+
+	if (intc.IRR0) {
+		if (intc.IRR0 & IRR0_IRQ1R) {
+			curr_priority = irq_priority(1);
+			if (curr_priority > max_priority) {
+				max_priority = curr_priority;
+				max_num = 1;
+				accept_fn = irq_accept;
+			}
+		}
+		if (intc.IRR0 & IRR0_IRQ3R) {
+			curr_priority = irq_priority(3);
+			if (curr_priority > max_priority) {
+				max_priority = curr_priority;
+				max_num = 3;
+				accept_fn = irq_accept;
+			}
+		}
+		if (intc.IRR0 & IRR0_IRQ4R) {
+			curr_priority = irq_priority(4);
+			if (curr_priority > max_priority) {
+				max_priority = curr_priority;
+				max_num = 4;
+				accept_fn = irq_accept;
+			}
+		}
+		if (intc.IRR0 & IRR0_PINT1R) {
+			curr_priority = pint_priority(1);
+			if (curr_priority > max_priority) {
+				max_priority = curr_priority;
+				max_num = 1;
+				accept_fn = pint_accept;
+			}
 		}
 	}
-	*which = -1;
-	return false;
+
+	for (i = 0; i < 3; ++i) {
+		if ((tmu.TCR[i] & TCR_UNIE) && (tmu.TCR[i] & TCR_UNF)) {
+			curr_priority = tuni_priority(i);
+			if (curr_priority > max_priority) {
+				max_priority = curr_priority;
+				max_num = i;
+				accept_fn = tuni_accept;
+			}
+		}
+	}
+
+	if (max_priority <= sr_interrupt_mask())
+		return;
+	accept_fn(max_num, max_priority);
 }
 
 static void interrupt_check(void)
 {
-	int timer_int;
-
 	/* Interrupts only get accepted after the delay slot */
 	if (cpu.extra_state & EXTRA_IN_DELAYED)
 		return;
@@ -9085,8 +9129,7 @@ static void interrupt_check(void)
 	if (!(cpu.extra_state & EXTRA_POWER_DOWN) && (cpu.SR & SR_BL_BIT))
 		return;
 
-	timer_int = -1;
-	if (!intc.IRR0 && !timer_underflow_interrupted(&timer_int))
+	if (!intc.IRR0 && !timer_underflow_interrupted())
 		return;
 
 	/*
@@ -9099,21 +9142,7 @@ static void interrupt_check(void)
 		cpu.PC += 2;
 	}
 
-	/*
-	 * When multiple interrupts are set at the same time, I think I should
-	 * accept the ones with higher priority first. For now I have neglected
-	 * this (TODO), but it probably won't matter much at our speed.
-	 */
-	if (intc.IRR0 & IRR0_IRQ1R)
-		return irq_accept(1, irq_priority(1));
-	if (intc.IRR0 & IRR0_IRQ3R)
-		return irq_accept(3, irq_priority(3));
-	if (intc.IRR0 & IRR0_IRQ4R)
-		return irq_accept(4, irq_priority(4));
-	if (intc.IRR0 & IRR0_PINT1R)
-		return pint_accept(1, pint_priority(1));
-	if (timer_int != -1)
-		return tuni_accept(timer_int, tuni_priority(timer_int));
+	return interrupt_accept();
 }
 
 static void mmu_set_rc(int rc)
