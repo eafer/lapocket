@@ -4642,10 +4642,24 @@ out:
 	return err;
 }
 
+static void pen_update(int x, int y);
+
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
 	if (event->type == SDL_EVENT_QUIT)
 		return SDL_APP_SUCCESS;
+
+	/* TODO: drag */
+	if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+		if (event->button.button != SDL_BUTTON_LEFT)
+			return SDL_APP_CONTINUE;
+		pen_update(event->button.x, event->button.y);
+	} else if (event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
+		if (event->button.button != SDL_BUTTON_LEFT)
+			return SDL_APP_CONTINUE;
+		pen_update(-1, -1);
+	}
+
 	return SDL_APP_CONTINUE;
 }
 
