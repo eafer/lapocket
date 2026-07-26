@@ -4567,6 +4567,10 @@ static int parse_options(int argc, char *argv[])
 static void reset(void);
 static int run(int steps);
 
+static SDL_Window *window = NULL;
+static SDL_Renderer *renderer = NULL;
+static SDL_Surface *win_surface = NULL;
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
 	if (parse_options(argc, argv))
@@ -4576,14 +4580,66 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	if (headless)
 		return emulate() ? SDL_APP_FAILURE : SDL_APP_SUCCESS;
 
+	/* TODO: pass an actual version string */
+	if (!SDL_SetAppMetadata("La Pocket", "prerelease", NULL))
+		return SDL_APP_FAILURE;
+	if (!SDL_Init(SDL_INIT_VIDEO)) {
+		fprintf(stderr, "%s: failed to initialize SDL (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	/* TODO: allow window resizing, use the renderer? */
+	if (!SDL_CreateWindowAndRenderer("La Pocket", DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, 0, &window, &renderer)) {
+		fprintf(stderr, "%s: failed to create the window (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	win_surface = SDL_GetWindowSurface(window);
+	if (!win_surface) {
+		fprintf(stderr, "%s: failed to get window surface (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	if (!SDL_ClearSurface(win_surface, 1, 1, 1, 1)) {
+		fprintf(stderr, "%s: failed to clear window surface (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	if (!SDL_UpdateWindowSurface(window)) {
+		fprintf(stderr, "%s: failed to update window from surface (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+
 	reset();
 	return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
+	SDL_Surface *src = NULL;
+	SDL_AppResult err;
+
 	/* TODO: support keyboard interrupts and everything else */
-	return run(1000) ? SDL_APP_FAILURE : SDL_APP_CONTINUE;
+	if (run(1000000))
+		return SDL_APP_FAILURE;
+
+	display_update_output();
+	src = SDL_CreateSurfaceFrom(DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, SDL_PIXELFORMAT_ABGR8888, display.output, DISPLAY_FB_WIDTH << 2);
+	if (!src) {
+		fprintf(stderr, "%s: failed to create framebuffer surface (%s)\n", progname, SDL_GetError());
+		err = SDL_APP_FAILURE;
+		goto out;
+	}
+	if (!SDL_BlitSurface(src, NULL, win_surface, NULL)) {
+		fprintf(stderr, "%s: failed to blit surface (%s)\n", progname, SDL_GetError());
+		err = SDL_APP_FAILURE;
+		goto out;
+	}
+	if (!SDL_UpdateWindowSurface(window)) {
+		fprintf(stderr, "%s: failed to update window from surface (%s)\n", progname, SDL_GetError());
+		err = SDL_APP_FAILURE;
+		goto out;
+	}
+	err = SDL_APP_CONTINUE;
+out:
+	SDL_DestroySurface(src);
+	return err;
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
