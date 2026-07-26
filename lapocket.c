@@ -31,6 +31,8 @@ static void print_backtrace(void);
 static bool running = false;
 static bool panicked = false;
 static bool kbinterrupted = false;
+static bool refresh_time = false;
+static int remaining_steps = -1;
 
 #ifdef __unix__
 #include <signal.h>
@@ -4474,7 +4476,7 @@ static void usage(void)
 	exit(1);
 }
 
-static int emulate(void);
+static void emulate(void);
 
 static int parse_options(int argc, char *argv[])
 {
@@ -4565,7 +4567,6 @@ static int parse_options(int argc, char *argv[])
 #ifdef HAVE_SDL
 
 static void reset(void);
-static int run(int steps);
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
@@ -4578,7 +4579,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	set_signal_handlers();
 
 	if (headless)
-		return emulate() ? SDL_APP_FAILURE : SDL_APP_SUCCESS;
+		emulate();
 
 	/* TODO: pass an actual version string */
 	if (!SDL_SetAppMetadata("La Pocket", "prerelease", NULL))
@@ -4610,16 +4611,17 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	return SDL_APP_CONTINUE;
 }
 
+static void prompt_loop(void);
+
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
 	SDL_Surface *src = NULL;
 	SDL_AppResult err;
 
-	/* TODO: support keyboard interrupts and everything else */
-	if (run(1000000))
-		return SDL_APP_FAILURE;
-
+	remaining_steps = -1;
+	prompt_loop();
 	display_update_output();
+
 	src = SDL_CreateSurfaceFrom(DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, SDL_PIXELFORMAT_ABGR8888, display.output, DISPLAY_FB_WIDTH << 2);
 	if (!src) {
 		fprintf(stderr, "%s: failed to create framebuffer surface (%s)\n", progname, SDL_GetError());
@@ -9265,10 +9267,10 @@ static void exception_check(void)
 	return interrupt_check();
 }
 
-/* Emulate indefinitely if @steps < 0 */
-static int run(int steps)
+/* The step count is in the remaining_steps global (-1 means forever) */
+static int run(void)
 {
-	bool forever = steps < 0;
+	bool forever = remaining_steps < 0;
 	bool delayed_slot;
 	uint32_t pc, old_pc;
 	int ret;
@@ -9276,13 +9278,6 @@ static int run(int steps)
 	running = true;
 
 	while (true) {
-		if (!interactive && !script_file) {
-			dump_micro();
-			printf("\n******\n\n");
-			printf("ASM: ");
-			disassemble(cpu.PC);
-		}
-
 		/* This can change the PC, so do it before the breakpoint check */
 		exception_check();
 
@@ -9301,6 +9296,7 @@ static int run(int steps)
 				break;
 			}
 			if (ret && watchpoints.hit) {
+				update_clocks();
 				ret = 0;
 				break;
 			}
@@ -9322,19 +9318,35 @@ static int run(int steps)
 			update_scif();
 			update_top_light();
 			if (!forever) {
-				if (--steps == 0) {
+				if (--remaining_steps == 0) {
+					update_clocks();
 					ret = 0;
 					break;
 				}
 			}
 		}
-		/* TODO: update the clocks on the last step too */
 		update_clocks();
 
 		if (kbinterrupted) {
 			ret = 0;
 			break;
 		}
+#ifdef HAVE_SDL
+		{
+			static unsigned int last_refresh = 0;
+			unsigned int now;
+
+			/* Return regularly to refresh the screen and check for input */
+			now = SDL_GetTicks();
+			if (now - last_refresh >= 16) {
+				/* 60 hz, seems reasonable */
+				refresh_time = true;
+				last_refresh = now;
+				ret = 0;
+				break;
+			}
+		}
+#endif
 	}
 
 	running = false;
@@ -9343,6 +9355,7 @@ static int run(int steps)
 
 #define CLI_CONTINUE	0
 #define CLI_EXIT		1
+#define CLI_RUN			2
 
 static int exit_command_handler(int argc, const char **argv)
 {
@@ -9408,17 +9421,12 @@ static int stop_command_handler(int argc, const char **argv)
 
 static int run_command_handler(int argc, const char **argv)
 {
-	int err;
-
 	if (argc != 1) {
 		printf("Invalid run command\n");
 		return CLI_CONTINUE;
 	}
-
-	err = run(-1 /* steps*/);
-	if (err)
-		printf("An error was encountered\n");
-	return CLI_CONTINUE;
+	remaining_steps = -1;
+	return CLI_RUN;
 }
 
 static int step_command_handler(int argc, const char **argv)
@@ -9437,9 +9445,8 @@ static int step_command_handler(int argc, const char **argv)
 		}
 	}
 
-	if (run(stepcount))
-		printf("An error was encountered\n");
-	return CLI_CONTINUE;
+	remaining_steps = stepcount;
+	return CLI_RUN;
 }
 
 static int dump_command_handler(int argc, const char **argv)
@@ -10556,14 +10563,27 @@ static void prompt_loop(void)
 {
 	FILE *infile = NULL;
 	static char line[4096] = {0};
-	int ret = CLI_CONTINUE;
+	static int status = -1;
 
-	while (ret == CLI_CONTINUE) {
-		dump_all_monitors();
+	/* The user may want a prompt before any code has a chance to run */
+	if (status == -1)
+		status = interactive || script_file ? CLI_CONTINUE : CLI_RUN;
+
+	while (status != CLI_EXIT) {
+		if (status == CLI_RUN)
+			run();
 		if (kbinterrupted) {
 			kbinterrupted = false;
 			become_interactive();
+		} else if (refresh_time) {
+			/*
+			 * It's time to refresh the screen and check for input events. The
+			 * caller must take care of that and then restart the prompt loop.
+			 */
+			refresh_time = false;
+			return;
 		}
+		dump_all_monitors();
 		infile = script_file ? script_file : stdin;
 		if (interactive) {
 			printf("debug> ");
@@ -10572,6 +10592,7 @@ static void prompt_loop(void)
 		if (!fgets(line, sizeof(line), infile)) {
 			if (kbinterrupted) {
 				puts("");
+				status = CLI_CONTINUE;
 				continue;
 			}
 			if (feof(infile))
@@ -10579,19 +10600,22 @@ static void prompt_loop(void)
 			fprintf(stderr, "Failed to read from input\n");
 			exit(1);
 		}
-		ret = dispatch_command_line(line);
+		status = dispatch_command_line(line);
 	}
+	exit(0);
 }
 
-static int emulate(void)
+static void emulate(void)
 {
 	reset();
 
-	if (interactive || script_file) {
+	/*
+	 * I don't really need to return regularly from prompt_loop() here, but I
+	 * want the code to be similar to the SDL path.
+	 */
+	remaining_steps = -1;
+	while (true)
 		prompt_loop();
-		return 0;
-	}
-	return run(-1 /* steps */);
 }
 
 /*
