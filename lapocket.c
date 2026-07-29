@@ -33,6 +33,7 @@ static bool panicked = false;
 static bool kbinterrupted = false;
 static bool refresh_time = false;
 static int remaining_steps = -1;
+static long long nanosecs = 0;
 
 #ifdef __unix__
 #include <signal.h>
@@ -2127,7 +2128,7 @@ struct bsc {
 
 	/* TODO: SDMR */
 
-	int ckio_tics;		/* Count of CKIO tics since last RTCNT update */
+	long long pretime;	/* Nanoseconds at last RTCNT update */
 } bsc = {0};
 
 /* Flags of the RTCSR register */
@@ -3692,11 +3693,7 @@ struct rtc {
 	uint8_t RCR1;		/* RTC control register 1 */
 	uint8_t RCR2;		/* RTC control register 2 */
 
-	/*
-	 * Count of peripheral tics since last R64CNT update. TODO: don't keep
-	 * separate counts for rtc and tmu, simplify this somehow.
-	 */
-	int peripheral_tics;
+	long long pretime;	/* Nanoseconds at last R64CNT update */
 } rtc = {0};
 
 /* Flags of the RCR1 register */
@@ -3911,8 +3908,8 @@ struct tmu {
 	uint32_t TCNT[3];	/* Timer counter 0-2 */
 	uint32_t TCPR2;		/* Input capture register 2 */
 
-	/* Count of peripheral clock tics since last corresponding TCNT update */
-	int peripheral_tics[3];
+	/* Nanoseconds at last TCNT update update for each channel */
+	long long pretime[3];
 } tmu = {0};
 
 /* Flags of the TCR0-2 registers */
@@ -4921,9 +4918,17 @@ static int read_tmu_byte_reg(uint32_t addr, uint8_t *val_p)
 
 static int tmu_write_byte_reg(uint32_t addr, uint8_t val)
 {
+	uint8_t flag;
+	int i;
+
 	switch (addr) {
 	case TMU_TSTR_OFF:
 		val &= TSTR_BIT_MASK;
+		for (i = 0; i < 3; ++i) {
+			flag = 1U << i;
+			if (!(tmu.TSTR & flag) && (val & flag))
+				tmu.pretime[i] = nanosecs;
+		}
 		tmu.TSTR = val;
 		return 0;
 	default:
@@ -5370,6 +5375,8 @@ static int write_nonsdmr_bsc_reg(uint32_t addr, uint16_t val)
 			uint16_t preserved_bits = val & RTCSR_UNSETTABLE_MASK;
 			val = (val & ~preserved_bits) | (bsc.RTCSR & preserved_bits);
 		}
+		if ((bsc.RTCSR ^ val) & RTCSR_CKS)
+			bsc.pretime = nanosecs;
 		bsc.RTCSR = val & 0x00FFU;
 		return 0;
 	case BSC_RTCNT_OFF:
@@ -8774,13 +8781,20 @@ static void update_clocks(void)
 {
 	int i;
 
+	/*
+	 * The cpu frequency is 133 MHz, and we assume just a couple of cycles
+	 * per instruction. Arbitrary, of course, so it's ok to change it if
+	 * it's a problem later on.
+	 */
+	nanosecs += 20;
+
 	switch (bsc.RTCSR & RTCSR_CKS) {
 	case 0x0000:
 		break;	/* Clock is disabled */
 	case 0x0010:
-		++bsc.ckio_tics;
-		if (bsc.ckio_tics == 16) {
-			bsc.ckio_tics = 0;
+		/* TODO: be more careful with this clock... */
+		if (nanosecs - bsc.pretime >= 20 * 16) {
+			bsc.pretime = nanosecs;
 			increment_bsc_rtcnt();
 		}
 		break;
@@ -8792,9 +8806,8 @@ static void update_clocks(void)
 	for (i = 0; i < 3; ++i) {
 		if ((tmu.TSTR & (1U << i)) == 0)	/* Is this timer halted? */
 			continue;
-		tmu.peripheral_tics[i] += 4;
-		if (tmu.peripheral_tics[i] >= tmu_prescaler(i)) {
-			tmu.peripheral_tics[i] = 0;
+		if (nanosecs - tmu.pretime[i] >= 5 * tmu_prescaler(i)) {
+			tmu.pretime[i] = nanosecs;
 			decrement_tmu_tcnt(i);
 		}
 		break;
@@ -8804,9 +8817,8 @@ static void update_clocks(void)
 	 * R64CNT updates at 64 Hz, while the peripheral clock is set to ~22.12Mhz
 	 * (or so it seems from looking at <8003BB0C>).
 	 */
-	rtc.peripheral_tics += 4;
-	if (rtc.peripheral_tics >= 345600) {
-		rtc.peripheral_tics = 0;
+	if (nanosecs - rtc.pretime >= 5 * 345600) {
+		rtc.pretime = nanosecs;
 		/* TODO: update the seconds on overflow, and so on... */
 		if (++rtc.R64CNT == 64) {
 			rtc.R64CNT = 0;
