@@ -8792,8 +8792,11 @@ static void update_clocks(void)
 	case 0x0000:
 		break;	/* Clock is disabled */
 	case 0x0010:
-		/* TODO: be more careful with this clock... */
-		if (nanosecs - bsc.pretime >= 20 * 16) {
+		/*
+		 * An example CKIO clock input cycle time from the manual is 50 ns,
+		 * let's go with that for now. This CKS follows CKIO/16.
+		 */
+		if (nanosecs - bsc.pretime >= 50 * 16) {
 			bsc.pretime = nanosecs;
 			increment_bsc_rtcnt();
 		}
