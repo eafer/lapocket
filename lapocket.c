@@ -3900,6 +3900,8 @@ static int cache_read_longword_reg(uint32_t addr, uint32_t *val_p)
 #define TMU_TCNT2_OFF	0xFFFFFEB0
 #define TMU_TCPR2_OFF	0xFFFFFEB8
 
+#define TMU_PRETIME_MULT	1000000LL
+
 struct tmu {
 	uint8_t TOCR;		/* Timer output control register */
 	uint8_t TSTR;		/* Timer start register */
@@ -3908,7 +3910,12 @@ struct tmu {
 	uint32_t TCNT[3];	/* Timer counter 0-2 */
 	uint32_t TCPR2;		/* Input capture register 2 */
 
-	/* Nanoseconds at last TCNT update update for each channel */
+	/*
+	 * Nanoseconds at last TCNT update update for each channel, multiplied by
+	 * a TMU_PRETIME_MULT to get more precision without resorting to floating
+	 * point. TODO: this will wrap around after only a few hours, it might work
+	 * but I don't like it.
+	 */
 	long long pretime[3];
 } tmu = {0};
 
@@ -4927,7 +4934,7 @@ static int tmu_write_byte_reg(uint32_t addr, uint8_t val)
 		for (i = 0; i < 3; ++i) {
 			flag = 1U << i;
 			if (!(tmu.TSTR & flag) && (val & flag))
-				tmu.pretime[i] = nanosecs;
+				tmu.pretime[i] = TMU_PRETIME_MULT * nanosecs;
 		}
 		tmu.TSTR = val;
 		return 0;
@@ -8761,9 +8768,8 @@ static int tmu_prescaler(int i)
 	int tpsc, result;
 
 	tpsc = tmu.TCR[i] & TCR_TPSC;
-	/* TODO: we should actually use the RTC clock here */
-	if (tpsc == 4)
-		return 1;
+	if (tpsc >= 4)
+		return panic("BUG: prescaling a tmu clock that doesn't support it\n");
 
 	result = 4;
 	while (tpsc--)
@@ -8811,18 +8817,31 @@ static void update_clocks(void)
 	for (i = 0; i < 3; ++i) {
 		if ((tmu.TSTR & (1U << i)) == 0)	/* Is this timer halted? */
 			continue;
-		cycle = 5 * tmu_prescaler(i);
-		if (nanosecs - tmu.pretime[i] >= cycle) {
-			tmu.pretime[i] += cycle;
-			decrement_tmu_tcnt(i);
+		if ((tmu.TCR[i] & TCR_TPSC) == 4) {
+			/* The real-time clock has a frequency of 32.768 kHz */
+			cycle = 30517LL * TMU_PRETIME_MULT;
+			if (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
+				tmu.pretime[i] += cycle;
+				decrement_tmu_tcnt(i);
+			}
+		} else if ((tmu.TCR[i] & TCR_TPSC) < 4) {
+			/*
+			 * The peripheral clock is set to ~22.12Mhz (or so it seems from
+			 * looking at <8003BB0C>).
+			 */
+			cycle = 45211243LL * tmu_prescaler(i);
+			if (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
+				tmu.pretime[i] += cycle;
+				decrement_tmu_tcnt(i);
+			}
+		} else {
+			(void)panic("TMU timer prescaler 0x%x not implemented\n", tmu.TCR[i] & TCR_TPSC);
+			return;
 		}
 	}
 
-	/*
-	 * R64CNT updates at 64 Hz, while the peripheral clock is set to ~22.12Mhz
-	 * (or so it seems from looking at <8003BB0C>).
-	 */
-	cycle = 5 * 345600;
+	/* R64CNT updates at 64 Hz */
+	cycle = 15625000;
 	if (nanosecs - rtc.pretime >= cycle) {
 		rtc.pretime += cycle;
 		/* TODO: update the seconds on overflow, and so on... */
