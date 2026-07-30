@@ -8779,6 +8779,7 @@ static int tmu_prescaler(int i)
  */
 static void update_clocks(void)
 {
+	long long cycle;
 	int i;
 
 	/*
@@ -8796,8 +8797,9 @@ static void update_clocks(void)
 		 * An example CKIO clock input cycle time from the manual is 50 ns,
 		 * let's go with that for now. This CKS follows CKIO/16.
 		 */
-		if (nanosecs - bsc.pretime >= 50 * 16) {
-			bsc.pretime = nanosecs;
+		cycle = 50 * 16;
+		if (nanosecs - bsc.pretime >= cycle) {
+			bsc.pretime += cycle;
 			increment_bsc_rtcnt();
 		}
 		break;
@@ -8809,8 +8811,9 @@ static void update_clocks(void)
 	for (i = 0; i < 3; ++i) {
 		if ((tmu.TSTR & (1U << i)) == 0)	/* Is this timer halted? */
 			continue;
-		if (nanosecs - tmu.pretime[i] >= 5 * tmu_prescaler(i)) {
-			tmu.pretime[i] = nanosecs;
+		cycle = 5 * tmu_prescaler(i);
+		if (nanosecs - tmu.pretime[i] >= cycle) {
+			tmu.pretime[i] += cycle;
 			decrement_tmu_tcnt(i);
 		}
 		break;
@@ -8820,8 +8823,9 @@ static void update_clocks(void)
 	 * R64CNT updates at 64 Hz, while the peripheral clock is set to ~22.12Mhz
 	 * (or so it seems from looking at <8003BB0C>).
 	 */
-	if (nanosecs - rtc.pretime >= 5 * 345600) {
-		rtc.pretime = nanosecs;
+	cycle = 5 * 345600;
+	if (nanosecs - rtc.pretime >= cycle) {
+		rtc.pretime += cycle;
 		/* TODO: update the seconds on overflow, and so on... */
 		if (++rtc.R64CNT == 64) {
 			rtc.R64CNT = 0;
