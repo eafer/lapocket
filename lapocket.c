@@ -8816,7 +8816,6 @@ static void update_clocks(void)
 			tmu.pretime[i] += cycle;
 			decrement_tmu_tcnt(i);
 		}
-		break;
 	}
 
 	/*
