@@ -35,6 +35,8 @@ static bool refresh_time = false;
 static int remaining_steps = -1;
 static long long wait_end = 0;
 static long long nanosecs = 0;
+/* Keep track of the time spent inside the debugger */
+static long long debugger_nanosecs = 0;
 
 #ifdef __unix__
 #include <signal.h>
@@ -8801,7 +8803,21 @@ static void set_nanosecs_sdl(void)
 		fprintf(stderr, "%s: failed to get system time (%s)\n", progname, SDL_GetError());
 		exit(1);
 	}
-	nanosecs = now;
+	/* Don't count time while the emulation is frozen */
+	nanosecs = now - debugger_nanosecs;
+#endif
+}
+
+static void set_debugger_nanosecs_sdl()
+{
+#ifdef HAVE_SDL
+	SDL_Time now;
+
+	if (!SDL_GetCurrentTime(&now)) {
+		fprintf(stderr, "%s: failed to get system time (%s)\n", progname, SDL_GetError());
+		exit(1);
+	}
+	debugger_nanosecs = now - nanosecs;
 #endif
 }
 
@@ -10698,6 +10714,8 @@ static void prompt_loop(void)
 			exit(1);
 		}
 		status = dispatch_command_line(line);
+		if (!headless && status == CLI_RUN)
+			set_debugger_nanosecs_sdl();
 	}
 	exit(0);
 }
