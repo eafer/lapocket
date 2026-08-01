@@ -4481,6 +4481,7 @@ static void usage(void)
 }
 
 static void emulate(void);
+static void set_nanosecs_sdl(void);
 
 static int parse_options(int argc, char *argv[])
 {
@@ -4494,12 +4495,6 @@ static int parse_options(int argc, char *argv[])
 	if (argc == 0)
 		return 1;
 	progname = argv[0];
-
-	/*
-	 * TODO: add an option to pick this value in headless mode, and use that to
-	 * test for issues related to large timestamps.
-	 */
-	nanosecs = 0;
 
 	if (argc < 2)
 		usage();
@@ -4569,6 +4564,16 @@ static int parse_options(int argc, char *argv[])
 			perror(progname);
 			return 1;
 		}
+	}
+
+	if (headless) {
+		/*
+		 * TODO: add an option to pick this value in headless mode, and use
+		 * that to test for issues related to large timestamps.
+		 */
+		nanosecs = 0;
+	} else {
+		set_nanosecs_sdl();
 	}
 
 	return 0;
@@ -8786,6 +8791,19 @@ static int tmu_prescaler(int i)
 	return result;
 }
 
+static void set_nanosecs_sdl(void)
+{
+#ifdef HAVE_SDL
+	SDL_Time now;
+
+	if (!SDL_GetCurrentTime(&now)) {
+		fprintf(stderr, "%s: failed to get system time (%s)\n", progname, SDL_GetError());
+		exit(1);
+	}
+	nanosecs = now;
+#endif
+}
+
 /*
  * We want the tests to be deterministic so, when running headless, the clock
  * update frequency is arbitrarily synced to the execution loop. All that
@@ -8797,12 +8815,16 @@ static void update_clocks(void)
 	long long cycle;
 	int i;
 
-	/*
-	 * The cpu frequency is 133 MHz, and we assume just a couple of cycles
-	 * per instruction. Arbitrary, of course, so it's ok to change it if
-	 * it's a problem later on.
-	 */
-	nanosecs += 20;
+	if (headless) {
+		/*
+		 * The cpu frequency is 133 MHz, and we assume just a couple of cycles
+		 * per instruction. Arbitrary, of course, so it's ok to change it if
+		 * it's a problem later on.
+		 */
+		nanosecs += 20;
+	} else {
+		set_nanosecs_sdl();
+	}
 
 	switch (bsc.RTCSR & RTCSR_CKS) {
 	case 0x0000:
