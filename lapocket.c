@@ -4495,6 +4495,12 @@ static int parse_options(int argc, char *argv[])
 		return 1;
 	progname = argv[0];
 
+	/*
+	 * TODO: add an option to pick this value in headless mode, and use that to
+	 * test for issues related to large timestamps.
+	 */
+	nanosecs = 0;
+
 	if (argc < 2)
 		usage();
 	for (i = 1; i < argc; ++i) {
@@ -6308,6 +6314,9 @@ static void init_pdm(void)
 static void init_rtc(void)
 {
 	rtc.RCR2 = 0x09;
+
+	/* The R64CNT counter starts running immediately */
+	rtc.pretime = nanosecs;
 }
 
 static void init_intc(void)
