@@ -33,6 +33,7 @@ static bool panicked = false;
 static bool kbinterrupted = false;
 static bool refresh_time = false;
 static int remaining_steps = -1;
+static long long wait_end = 0;
 static long long nanosecs = 0;
 
 #ifdef __unix__
@@ -9394,6 +9395,11 @@ static int run(void)
 			}
 		}
 		update_clocks();
+		if (wait_end && nanosecs >= wait_end) {
+			wait_end = 0;
+			ret = 0;
+			break;
+		}
 
 		if (kbinterrupted) {
 			ret = 0;
@@ -9514,6 +9520,28 @@ static int step_command_handler(int argc, const char **argv)
 	}
 
 	remaining_steps = stepcount;
+	return CLI_RUN;
+}
+
+static int wait_command_handler(int argc, const char **argv)
+{
+	long long msecs;
+
+	/* Wait one second by default */
+	msecs = 1000;
+	if (argc > 2) {
+		printf("Invalid wait command\n");
+		return CLI_CONTINUE;
+	}
+	if (argc == 2) {
+		msecs = atoi(argv[1]); /* TODO: don't use atoi? */
+		if (msecs < 1) {
+			printf("Invalid millisecond count %lld\n", msecs);
+			return CLI_CONTINUE;
+		}
+	}
+
+	wait_end = nanosecs + 1000 * 1000 * msecs;
 	return CLI_RUN;
 }
 
@@ -10551,6 +10579,7 @@ struct shell_command shell_command_list[] = {
 	{"set", "set register_name [+|-]value", set_command_handler},
 	{"step", "step [count]", step_command_handler},
 	{"stop", "stop", stop_command_handler},
+	{"wait", "wait [milliseconds]", wait_command_handler},
 	{"watch", "watch address", watch_command_handler},
 	{"xxd", "xxd [address] length", xxd_command_handler},
 };
