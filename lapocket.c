@@ -10444,6 +10444,120 @@ static int print_command_handler(int argc, const char **argv)
 	return CLI_CONTINUE;
 }
 
+struct struct_layout {
+	void *data;
+	size_t size;
+} dump_layout[] = {
+	{memory, sizeof(memory)},
+	{&nanosecs, sizeof(nanosecs)},
+	{&motherboard, sizeof(motherboard)},
+	{&battery, sizeof(battery)},
+	{&touchscreen, sizeof(touchscreen)},
+	{&adconv, sizeof(adconv)},
+	{&daconv, sizeof(daconv)},
+	{&button_state, sizeof(button_state)},
+	{&front4_requested, sizeof(front4_requested)},
+	{&usb, sizeof(usb)},
+	{&display, sizeof(display)},
+	{&i2c, sizeof(i2c)},
+	{&cpu, sizeof(cpu)},
+	{&cfcard, sizeof(cfcard)},
+	{&eeprom, sizeof(eeprom)},
+	{&bsc, sizeof(bsc)},
+	{&pfc_regs, sizeof(pfc_regs)},
+	{&ioports, sizeof(ioports)},
+	{&dmac, sizeof(dmac)},
+	{&scif, sizeof(scif)},
+	{&cpg, sizeof(cpg)},
+	{&wdt_regs, sizeof(wdt_regs)},
+	{&stbcr_reg, sizeof(stbcr_reg)},
+	{&stbcr_2_reg, sizeof(stbcr_2_reg)},
+	{&intc, sizeof(intc)},
+	{&rtc, sizeof(rtc)},
+	{&pdm, sizeof(pdm)},
+	{&ubc, sizeof(ubc)},
+	{&cache, sizeof(cache)},
+	{&tmu, sizeof(tmu)},
+	{&mmu, sizeof(mmu)},
+};
+
+/*
+ * Saves the entire state of the emulation to a file. This is extremely
+ * hacky and machine-dependent at this point (TODO), so beware.
+ */
+static int save_command_handler(int argc, const char **argv)
+{
+	FILE *file = NULL;
+	const char *path = NULL;
+	size_t ret;
+	int i, end;
+
+	if (argc != 2) {
+		printf("Invalid save command: target file missing\n");
+		return CLI_CONTINUE;
+	}
+	path = argv[1];
+
+	file = fopen(path, "wb");
+	if (!file) {
+		perror("save");
+		return CLI_CONTINUE;
+	}
+
+	end = sizeof(dump_layout) / sizeof(dump_layout[0]);
+	for (i = 0; i < end; ++i) {
+		ret = fwrite(dump_layout[i].data, 1, dump_layout[i].size, file);
+		if (ret != dump_layout[i].size) {
+			printf("save: write failed\n");
+			fclose(file);
+			return CLI_CONTINUE;
+		}
+	}
+
+	if (fclose(file)) {
+		perror("save");
+		return CLI_CONTINUE;
+	}
+	return CLI_CONTINUE;
+}
+
+/* Restores an emulation state created by the save command. Again, beware. */
+static int load_command_handler(int argc, const char **argv)
+{
+	FILE *file = NULL;
+	const char *path = NULL;
+	size_t ret;
+	int i, end;
+
+	if (argc != 2) {
+		printf("Invalid load command: target file missing\n");
+		return CLI_CONTINUE;
+	}
+	path = argv[1];
+
+	file = fopen(path, "r");
+	if (!file) {
+		perror("load");
+		return CLI_CONTINUE;
+	}
+
+	end = sizeof(dump_layout) / sizeof(dump_layout[0]);
+	for (i = 0; i < end; ++i) {
+		ret = fread(dump_layout[i].data, 1, dump_layout[i].size, file);
+		if (ret != dump_layout[i].size) {
+			printf("load: read failed\n");
+			fclose(file);
+			return CLI_CONTINUE;
+		}
+	}
+
+	if (fclose(file)) {
+		perror("load");
+		return CLI_CONTINUE;
+	}
+	return CLI_CONTINUE;
+}
+
 static int patch_command_handler(int argc, const char **argv)
 {
 	struct patch *p = NULL;
@@ -10611,12 +10725,14 @@ struct shell_command shell_command_list[] = {
 	{"exit", "exit", exit_command_handler},
 	{"help", "help [command]", help_command_handler},
 	{"input", "input [button]", input_command_handler},
+	{"load", "load [input_file]", load_command_handler},
 	{"map", "map virtual_address physical_address length", map_command_handler},
 	{"monitor", "monitor [eeprom|notice|serial|xb3a] [on|off]", monitor_command_handler},
 	{"patch", "patch address instruction", patch_command_handler},
 	{"print", "print [--raw] [output_file]", print_command_handler},
 	{"run", "run", run_command_handler},
 	{"rwatch", "rwatch address", watch_command_handler},
+	{"save", "save [output_file]", save_command_handler},
 	{"serialin", "serialin input", serialin_command_handler},
 	{"set", "set register_name [+|-]value", set_command_handler},
 	{"step", "step [count]", step_command_handler},

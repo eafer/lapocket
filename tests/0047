@@ -1,0 +1,96 @@
+# Tests save and load, and preserves a post-boot dump for future tests
+
+monitor notice off
+monitor xb3a off
+
+# Boot and run until the user gets prompted to tap the screen. The exact wait
+# time in spoofed time is hard to predict, but apparently 16 seconds is enough.
+wait 16000
+
+# Tap the screen to reach the calibration prompt
+input pen 10,10
+wait 100
+input pen up
+wait
+
+# Complete the calibration
+input pen 120,160
+wait 100
+input pen up
+wait
+input pen 49,65
+wait 100
+input pen up
+wait
+input pen 49,257
+wait 100
+input pen up
+wait
+input pen 193,257
+wait 100
+input pen up
+wait
+input pen 193,65
+wait 100
+input pen up
+wait
+
+# Now complete the tutorial...
+wait
+# Push the "Siguiente" button
+input pen 200,302
+wait 100
+input pen up
+wait
+# Hold the pen down on the dentist appointment
+input pen 112,204
+wait 2000
+input pen up
+wait
+# Pick "Cortar" from the context menu
+input pen 62,211
+wait 100
+input pen up
+wait
+# Hold the pen down on "11 a.m."
+input pen 70,224
+wait 2000
+input pen up
+wait
+# Pick "Pegar" from the context menu
+input pen 31,262
+wait 100
+input pen up
+wait
+# Push "Siguiente" twice
+input pen 200,302
+wait 100
+input pen up
+wait
+input pen 200,302
+wait 100
+input pen up
+wait
+# Push anywhere and we are done
+input pen 10,10
+wait 100
+input pen up
+wait
+
+# Confirm that we reached the "Hoy" (today) screen and then save
+print CRC
+save bin/0047.dump
+
+# Open some program ("Contactos") so that the load isn't trivial
+input QL2
+wait 100
+input QL2
+wait
+print CRC
+
+# Now confirm that the load takes as back to "Hoy"
+load bin/0047.dump
+wait
+print CRC
+
+exit

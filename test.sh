@@ -23,7 +23,9 @@ fail () {
 touch "$cardfile"
 truncate -s 256M "$cardfile"
 
+rm -rf ./tests/bin
 cd ./tests
+mkdir bin
 for filename in *.out; do
 	echo -n "${filename%.out}... "
 	# TODO: fully support the card in all tests
