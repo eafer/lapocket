@@ -29,6 +29,7 @@ static void dump_cpu(void);
 static void print_backtrace(void);
 
 static bool running = false;
+static bool executing = false;
 static bool panicked = false;
 static bool kbinterrupted = false;
 static bool refresh_time = false;
@@ -4407,7 +4408,10 @@ struct watchpoints {
 	uint32_t addrs[MAX_BREAKPOINTS];
 
 	bool hit;
-} watchpoints = {0};
+};
+
+struct watchpoints write_watchpoints = {0};
+struct watchpoints read_watchpoints = {0};
 
 struct vm_mapping {
 	uint32_t virt;
@@ -5544,6 +5548,8 @@ static int except_read_longword_reg(uint32_t addr, uint32_t *val_p)
 	}
 }
 
+static bool addr_is_watchpoint(uint32_t addr, bool write);
+
 static int read_byte(uint32_t addr, uint8_t *val_p)
 {
 	uint32_t pa;
@@ -5553,6 +5559,8 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
+	if (addr_is_watchpoint(addr, false))
+		return 1;
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
@@ -5632,6 +5640,8 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
+	if (addr_is_watchpoint(addr, false))
+		return 1;
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
@@ -5708,6 +5718,8 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
+	if (addr_is_watchpoint(addr, false))
+		return 1;
 
 	switch (addr & 0xFF000000) {
 	case FIRMWARE_OFF:
@@ -5761,8 +5773,6 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 	return panic("Attempted read of unknown address 0x%.8x\n", addr);
 }
 
-static bool addr_is_watchpoint(uint32_t addr);
-
 static int write_byte(uint32_t addr, uint8_t val)
 {
 	uint32_t pa;
@@ -5772,7 +5782,7 @@ static int write_byte(uint32_t addr, uint8_t val)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
-	if (addr_is_watchpoint(addr))
+	if (addr_is_watchpoint(addr, true))
 		return 1;
 
 	switch (addr & 0xFF000000) {
@@ -5861,7 +5871,7 @@ static int write_word(uint32_t addr, uint16_t val)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
-	if (addr_is_watchpoint(addr))
+	if (addr_is_watchpoint(addr, true))
 		return 1;
 
 	switch (addr & 0xFF000000) {
@@ -5950,7 +5960,7 @@ static int write_longword(uint32_t addr, uint32_t val)
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
-	if (addr_is_watchpoint(addr))
+	if (addr_is_watchpoint(addr, true))
 		return 1;
 
 	switch (addr & 0xFF000000) {
@@ -7967,6 +7977,8 @@ static int execute(uint32_t pc)
 	if (read_insn(pc, &insn))
 		return 1;
 
+	executing = true;
+
 	switch (insn & 0xF000) {
 	case 0x0000:
 		ret = execute_0uuu_format(pc, insn);
@@ -8019,12 +8031,14 @@ static int execute(uint32_t pc)
 			cpu.PC += 4;
 			ret = 0;
 		} else {
-			return panic("DSP instruction encountered outside DSP mode (PC: 0x%.8x)\n", cpu.PC);
+			ret = panic("DSP instruction encountered outside DSP mode (PC: 0x%.8x)\n", cpu.PC);
 		}
 		break;
 	default:
-		return panic("Instruction 0x%x not implemented\n", insn);
+		ret = panic("Instruction 0x%x not implemented\n", insn);
 	}
+
+	executing = false;
 	return ret;
 }
 
@@ -9014,26 +9028,33 @@ static bool pc_is_breakpoint(uint32_t pc)
 	return false;
 }
 
-static bool addr_is_watchpoint(uint32_t addr)
+static bool addr_is_watchpoint(uint32_t addr, bool write)
 {
+	struct watchpoints *wpoints = NULL;
 	int i;
 
-	/* Watchpoints make no sense for memory inspection with the debugger */
-	if (!running)
+	/*
+	 * Watchpoints make no sense for memory inspection with the debugger. We
+	 * also want to avoid rwatch breaks on instruction fetches, that's what
+	 * breakpoints are for.
+	 */
+	if (!executing)
 		return false;
+
+	wpoints = write ? &write_watchpoints : &read_watchpoints;
 
 	/*
 	 * Don't keep breaking in the same place. TODO: this seems to break down
 	 * with interrupts sometimes.
 	 */
-	if (watchpoints.hit) {
-		watchpoints.hit = false;
+	if (wpoints->hit) {
+		wpoints->hit = false;
 		return false;
 	}
 
-	for (i = 0; i < watchpoints.addr_count; ++i) {
-		if (addr == watchpoints.addrs[i]) {
-			watchpoints.hit = true;
+	for (i = 0; i < wpoints->addr_count; ++i) {
+		if (addr == wpoints->addrs[i]) {
+			wpoints->hit = true;
 			return true;
 		}
 	}
@@ -9379,7 +9400,7 @@ static int run(void)
 				become_interactive();
 				break;
 			}
-			if (ret && watchpoints.hit) {
+			if (ret && (read_watchpoints.hit || write_watchpoints.hit)) {
 				update_clocks();
 				ret = 0;
 				break;
@@ -9669,14 +9690,18 @@ static int break_command_handler(int argc, const char **argv)
 	return CLI_CONTINUE;
 }
 
+/* Covers rwatch as well */
 static int watch_command_handler(int argc, const char **argv)
 {
+	struct watchpoints *wpoints = NULL;
 	uint32_t addr;
 	char *endptr = NULL;
 	unsigned long tmp;
 
+	wpoints = strcmp(argv[0], "rwatch") == 0 ? &read_watchpoints : &write_watchpoints;
+
 	if (argc != 2) {
-		printf("Invalid watch command\n");
+		printf("Invalid %s command\n", argv[0]);
 		return CLI_CONTINUE;
 	}
 
@@ -9687,11 +9712,11 @@ static int watch_command_handler(int argc, const char **argv)
 	}
 	addr = tmp;
 
-	if (watchpoints.addr_count == MAX_WATCHPOINTS) {
+	if (wpoints->addr_count == MAX_WATCHPOINTS) {
 		printf("Watchpoint limit reached\n");
 		return CLI_CONTINUE;
 	}
-	watchpoints.addrs[watchpoints.addr_count++] = addr;
+	wpoints->addrs[wpoints->addr_count++] = addr;
 	return CLI_CONTINUE;
 }
 
@@ -10591,6 +10616,7 @@ struct shell_command shell_command_list[] = {
 	{"patch", "patch address instruction", patch_command_handler},
 	{"print", "print [--raw] [output_file]", print_command_handler},
 	{"run", "run", run_command_handler},
+	{"rwatch", "rwatch address", watch_command_handler},
 	{"serialin", "serialin input", serialin_command_handler},
 	{"set", "set register_name [+|-]value", set_command_handler},
 	{"step", "step [count]", step_command_handler},

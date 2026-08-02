@@ -1,0 +1,22 @@
+# Tests the watch and rwatch commands
+
+monitor notice off
+
+# Set watchpoints on a few addresses that get accessed early on boot
+rwatch 0xffffff58	# Should NOT activate at 0x8002F5B4
+rwatch 0x04000104	# Should activate at 0x8002F5B8 but NOT at 0x8002F5BE
+watch 0x12000000	# Should activate at 0x8002F5C4
+
+# We don't count execution as a read, so these should not activate
+watch 0x8002F5CC
+rwatch 0x8002F5CE
+
+# Boot and run just a little bit, until we get past the test addresses
+break 0x8002f5d4
+run
+disas +0 1			# Confirm that we are at 0x8002F5B8
+run
+disas +0 1			# Confirm that we are at 0x8002F5C4
+run
+disas +0 1			# Confirm that we are at 0x8002f5d4
+exit
