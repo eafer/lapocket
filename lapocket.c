@@ -6585,6 +6585,7 @@ static int execute(uint32_t pc);
 #define INSN_D_BFS					0x8F00
 #define INSN_ND8_MOV_W				0x9000
 #define INSN_BRA					0xA000
+#define INSN_BSR					0xB000
 #define INSN_MOVB_R0_TO_AT_DISP_GBR	0xC000
 #define INSN_MOVW_R0_TO_AT_DISP_GBR	0xC100
 #define INSN_D_MOVLSG				0xC200
@@ -7667,6 +7668,11 @@ static int execute_d12_format(uint32_t pc, uint16_t insn)
 	case INSN_BRA:
 		target = cpu.PC + (d << 1) + 4;
 		return prepare_delayed_slot(target);
+	case INSN_BSR:
+		target = cpu.PC + (d << 1) + 4;
+		backtrace_push(cpu.PC, target, false /* exception */);
+		cpu.PR = cpu.PC;
+		return prepare_delayed_slot(target);
 	default:
 		break;
 	}
@@ -7997,6 +8003,7 @@ static int execute(uint32_t pc)
 		ret = execute_nm_format(pc, insn);
 		break;
 	case 0xA000:
+	case 0xB000:
 		ret = execute_d12_format(pc, insn);
 		break;
 	case 0x7000:
@@ -8531,6 +8538,10 @@ static void disassemble_d12_format(uint32_t pc, uint16_t insn)
 		target = pc + (d << 1) + 4;
 		printf("BRA $%.8x\n", target - 4);
 		return;
+	case INSN_BSR:
+		target = pc + (d << 1) + 4;
+		printf("BSR $%.8x\n", target - 4);
+		return;
 	default:
 		printf("d12 format instruction 0x%x not implemented\n", insn);
 		return;
@@ -8740,6 +8751,7 @@ static void disassemble(uint32_t pc)
 	case 0x6000:
 		return disassemble_nm_format(pc, insn);
 	case 0xA000:
+	case 0xB000:
 		return disassemble_d12_format(pc, insn);
 	case 0x7000:
 	case 0xE000:

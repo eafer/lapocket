@@ -1,0 +1,25 @@
+# Tests that OmniSolve can launch, which covers the new BSR instruction.
+
+monitor notice off
+monitor xb3a off
+
+load bin/0047.dump
+
+# "Inicio"
+input pen 12,7
+wait 100
+input pen up
+wait
+# "Programas"
+input pen 68,223
+wait 100
+input pen up
+wait
+# "OmniSolve"
+input pen 109,178
+wait 100
+input pen up
+wait
+
+print CRC
+exit
