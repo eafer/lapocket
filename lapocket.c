@@ -22,6 +22,7 @@ static void dump_all_monitors(void);
 #define MONITOR_NOTICE_ENABLED	(1U << 1)
 #define MONITOR_SERIAL_ENABLED	(1U << 2)
 #define MONITOR_XB3A_ENABLED	(1U << 3)
+#define MONITOR_PEN_ENABLED		(1U << 4)
 /* The eeprom i2c monitor is not very interesting so it's off by default */
 static uint8_t enabled_monitors = MONITOR_NOTICE_ENABLED | MONITOR_SERIAL_ENABLED | MONITOR_XB3A_ENABLED;
 
@@ -10206,6 +10207,14 @@ static void pen_update(int x, int y)
 		return;
 	}
 
+	if (enabled_monitors & MONITOR_PEN_ENABLED) {
+		dump_all_monitors();
+		if (x == -1)
+			printf("[PEN] up\n");
+		else
+			printf("[PEN] %d,%d\n", x, y);
+	}
+
 	if (touchscreen.x == -1)
 		return;
 	intc.IRR0 |= IRR0_IRQ3R;
@@ -10707,6 +10716,8 @@ static int monitor_command_handler(int argc, const char **argv)
 		write_flag_to_byte(&enabled_monitors, MONITOR_SERIAL_ENABLED, on);
 	} else if (strcmp(argv[1], "xb3a") == 0) {
 		write_flag_to_byte(&enabled_monitors, MONITOR_XB3A_ENABLED, on);
+	} else if (strcmp(argv[1], "pen") == 0) {
+		write_flag_to_byte(&enabled_monitors, MONITOR_PEN_ENABLED, on);
 	} else {
 		printf("No monitor called \"%s\"\n", argv[1]);
 		return CLI_CONTINUE;
