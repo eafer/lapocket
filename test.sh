@@ -4,6 +4,13 @@
 #   823609edf7fd72863ca37e7e4868cb3d
 set -e
 
+usage () {
+	echo "usage: ./test.sh path-to-firmware"
+	exit 1
+}
+
+[ "x$0" = "x./test.sh" ] || usage
+
 firmware=$1
 dumpfile=/tmp/lapocket-dump.tmp
 errfile=/tmp/lapocket-err.tmp
