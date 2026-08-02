@@ -4636,7 +4636,6 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 	SDL_Surface *src = NULL;
 	SDL_AppResult err;
 
-	remaining_steps = -1;
 	prompt_loop();
 	display_update_output();
 
@@ -9404,6 +9403,7 @@ static int run(void)
 			update_top_light();
 			if (!forever) {
 				if (--remaining_steps == 0) {
+					remaining_steps = -1;
 					update_clocks();
 					ret = 0;
 					break;
@@ -10728,7 +10728,6 @@ static void emulate(void)
 	 * I don't really need to return regularly from prompt_loop() here, but I
 	 * want the code to be similar to the SDL path.
 	 */
-	remaining_steps = -1;
 	while (true)
 		prompt_loop();
 }
