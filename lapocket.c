@@ -4598,10 +4598,11 @@ static void reset(void);
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
-static SDL_Surface *win_surface = NULL;
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
+	SDL_Surface *win_surface = NULL;
+
 	if (parse_options(argc, argv))
 		return SDL_APP_FAILURE;
 	set_signal_handlers();
@@ -4617,7 +4618,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 		return SDL_APP_FAILURE;
 	}
 	/* TODO: allow window resizing, use the renderer? */
-	if (!SDL_CreateWindowAndRenderer("La Pocket", DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, 0, &window, &renderer)) {
+	if (!SDL_CreateWindowAndRenderer("La Pocket", DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
 		fprintf(stderr, "%s: failed to create the window (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
@@ -4641,9 +4642,25 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
 static void prompt_loop(void);
 
+/* Find the area of the window where the screen is actually drawn */
+static void get_display_area(SDL_Surface *win_surface, SDL_Rect *rect)
+{
+	rect->x = rect->y = 0;
+
+	if (win_surface->w * DISPLAY_FB_HEIGHT >= win_surface->h * DISPLAY_FB_WIDTH) {
+		rect->h = win_surface->h;
+		rect->w = (rect->h * DISPLAY_FB_WIDTH) / DISPLAY_FB_HEIGHT;
+	} else {
+		rect->w = win_surface->w;
+		rect->h = (rect->w * DISPLAY_FB_HEIGHT) / DISPLAY_FB_WIDTH;
+	}
+}
+
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
+	SDL_Surface *win_surface = NULL;
 	SDL_Surface *src = NULL;
+	SDL_Rect dest = {0};
 	SDL_AppResult err;
 
 	prompt_loop();
@@ -4655,7 +4672,18 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 		err = SDL_APP_FAILURE;
 		goto out;
 	}
-	if (!SDL_BlitSurface(src, NULL, win_surface, NULL)) {
+	win_surface = SDL_GetWindowSurface(window);
+	if (!win_surface) {
+		fprintf(stderr, "%s: failed to get window surface (%s)\n", progname, SDL_GetError());
+		err = SDL_APP_FAILURE;
+		goto out;
+	}
+	get_display_area(win_surface, &dest);
+	/*
+	 * TODO: only allow scaling to multiples, maybe? I'm not at all convinced
+	 * by the result of any of the scalers.
+	 */
+	if (!SDL_BlitSurfaceScaled(src, NULL, win_surface, &dest, SDL_SCALEMODE_NEAREST)) {
 		fprintf(stderr, "%s: failed to blit surface (%s)\n", progname, SDL_GetError());
 		err = SDL_APP_FAILURE;
 		goto out;
@@ -4675,13 +4703,25 @@ static void pen_update(int x, int y);
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
+	SDL_Surface *win_surface = NULL;
+	SDL_Rect display = {0};
+	float scale;
+
 	if (event->type == SDL_EVENT_QUIT)
 		return SDL_APP_SUCCESS;
+
+	win_surface = SDL_GetWindowSurface(window);
+	if (!win_surface) {
+		fprintf(stderr, "%s: failed to get window surface (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	get_display_area(win_surface, &display);
+	scale = (float)DISPLAY_FB_WIDTH / display.w;
 
 	if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
-		pen_update(event->button.x, event->button.y);
+		pen_update(scale * event->button.x, scale * event->button.y);
 	} else if (event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
@@ -4689,7 +4729,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 	} else if (event->type == SDL_EVENT_MOUSE_MOTION) {
 		/* If the pen is already down, this is a drag */
 		if (touchscreen.x >= 0)
-			pen_update(event->motion.x, event->motion.y);
+			pen_update(scale * event->motion.x, scale * event->motion.y);
 	}
 
 	return SDL_APP_CONTINUE;
