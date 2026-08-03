@@ -4678,7 +4678,6 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 	if (event->type == SDL_EVENT_QUIT)
 		return SDL_APP_SUCCESS;
 
-	/* TODO: drag */
 	if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
@@ -4687,6 +4686,10 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
 		pen_update(-1, -1);
+	} else if (event->type == SDL_EVENT_MOUSE_MOTION) {
+		/* If the pen is already down, this is a drag */
+		if (touchscreen.x >= 0)
+			pen_update(event->motion.x, event->motion.y);
 	}
 
 	return SDL_APP_CONTINUE;
