@@ -1060,7 +1060,10 @@ struct cpu {
 #define EXTRA_INITIAL_WRITE		64U	/* Initial page write exception */
 #define EXTRA_RESERVED_INSN		128U	/* Reserved instruction exception */
 #define EXTRA_READ_ADDR_ERROR	256U	/* Address error on read */
-#define EXTRA_EXCEPTION			(EXTRA_PAGE_TLB_MISS | EXTRA_TLB_INVALID | EXTRA_INITIAL_WRITE | EXTRA_RESERVED_INSN | EXTRA_READ_ADDR_ERROR)
+#define EXTRA_READ_TLB_PROT		512U	/* TLB Protection Violation Exception on read */
+#define EXTRA_WRITE_TLB_PROT	1024U	/* TLB Protection Violation Exception on write */
+#define EXTRA_TLB_PROTECTION	(EXTRA_READ_TLB_PROT | EXTRA_WRITE_TLB_PROT)
+#define EXTRA_EXCEPTION			(EXTRA_PAGE_TLB_MISS | EXTRA_TLB_INVALID | EXTRA_INITIAL_WRITE | EXTRA_RESERVED_INSN | EXTRA_READ_ADDR_ERROR | EXTRA_TLB_PROTECTION)
 
 /*
  * Lots of other display registers get accessed below the display ram. Most of
@@ -4351,8 +4354,10 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 			}
 			protection = mmu_tlb_to_pr(tlb_data);
 			if (protection == 0x02) {
-				if (write)
-					return panic("Writing to world-readable page\n");
+				if (write) {
+					cpu_flag = EXTRA_WRITE_TLB_PROT;
+					break;
+				}
 			} else if (protection != 0x03) {
 				return panic("Unsupported page protection %d\n", protection);
 			}
@@ -9364,6 +9369,21 @@ static void address_error_accept(void)
 	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
+static void protection_violation_accept(void)
+{
+	mmu_set_pteh_vpn(cpu.tlb_exception_addr);
+	mmu.TEA = cpu.tlb_exception_addr;
+	cpu.EXPEVT = cpu.extra_state & EXTRA_WRITE_TLB_PROT ? 0xC0 : 0xA0;
+	cpu.SPC = cpu.PC - 4;
+	cpu.SSR = cpu.SR;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_set_rc(cpu.tlb_exception_way);
+	cpu.PC = cpu.VBR + 0x100 + 4;
+
+	cpu.extra_state &= ~EXTRA_TLB_PROTECTION;
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
+}
+
 static void exception_check(void)
 {
 	if (cpu.extra_state & EXTRA_EXCEPTION) {
@@ -9381,6 +9401,8 @@ static void exception_check(void)
 			return reserved_instruction_accept();
 		if (cpu.extra_state & EXTRA_READ_ADDR_ERROR)
 			return address_error_accept();
+		if (cpu.extra_state & EXTRA_TLB_PROTECTION)
+			return protection_violation_accept();
 	}
 	return interrupt_check();
 }

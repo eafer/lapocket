@@ -1,0 +1,20 @@
+# Tests the Internet Explorer launch, which triggers a TLB protection violation
+
+monitor notice off
+monitor xb3a off
+
+load bin/0047.dump
+
+# "Inicio"
+input pen 12,7
+wait 100
+input pen up
+wait
+# "Internet Explorer"
+input pen 73,137
+wait 100
+input pen up
+wait 3000
+
+print CRC
+exit
