@@ -8879,6 +8879,8 @@ static void set_nanosecs_sdl(void)
 	}
 	/* Don't count time while the emulation is frozen */
 	nanosecs = now - debugger_nanosecs;
+#else
+	(void)debugger_nanosecs;
 #endif
 }
 
@@ -8892,6 +8894,8 @@ static void set_debugger_nanosecs_sdl()
 		exit(1);
 	}
 	debugger_nanosecs = now - nanosecs;
+#else
+	(void)debugger_nanosecs;
 #endif
 }
 
