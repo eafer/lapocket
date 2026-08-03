@@ -1,0 +1,47 @@
+# Tests that the Solitaire clock deals well with waits and loads
+
+monitor notice off
+monitor xb3a off
+
+load bin/0047.dump
+
+# "Inicio"
+input pen 12,7
+wait 100
+input pen up
+wait
+# "Programas"
+input pen 81,225
+wait 100
+input pen up
+wait
+# "Juegos"
+input pen 116,48
+wait 100
+input pen up
+wait
+# "Solitario"
+input pen 39,45
+wait 100
+input pen up
+wait
+
+# Click on the deck to start the timer and let it run for 5 seconds
+input pen 19,55
+wait 100
+input pen up
+wait 5000
+print CRC
+
+# Save the state at 5 seconds and let it run for 5 more
+save bin/0050.dump
+wait 5000
+print CRC
+
+# Restore to 5 seconds and run for 5 more again
+load bin/0050.dump
+print CRC
+wait 5000
+print CRC
+
+exit
