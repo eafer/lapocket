@@ -6550,6 +6550,7 @@ static int execute(uint32_t pc);
 #define INSN_NM_SUBC				0x300A
 #define INSN_NM_ADD					0x300C
 #define INSN_NM_ADDC				0x300E
+#define INSN_NM_ADDV				0x300F
 #define INSN_N_SHLL					0x4000
 #define INSN_N_SHLR					0x4001
 #define INSN_N_SHLL2				0x4008
@@ -7322,6 +7323,21 @@ static int execute_div1(uint32_t m, uint32_t n)
 	return 0;
 }
 
+static uint32_t signed_sum(uint32_t a, uint32_t b, bool *overflow)
+{
+	uint32_t res;
+	bool a_sign, b_sign, res_sign;
+
+	res = a + b;
+
+	a_sign = a & (1 << 31);
+	b_sign = b & (1 << 31);
+	res_sign = res & (1 << 31);
+
+	*overflow = a_sign == b_sign && res_sign != a_sign;
+	return res;
+}
+
 /* Instructions of the form xxxx nnnn mmmm xxxx */
 static int execute_nm_format(uint32_t pc, uint16_t insn)
 {
@@ -7515,6 +7531,13 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 			write_flag_to_long(&cpu.SR, SR_T_BIT, nval < read_gp_register(n));
 		}
 		write_gp_register(n, nval);
+		cpu.PC += 2;
+		return 0;
+	case INSN_NM_ADDV:
+		nval = read_gp_register(n);
+		mval = read_gp_register(m);
+		write_gp_register(n, signed_sum(nval, mval, &tbit));
+		write_flag_to_long(&cpu.SR, SR_T_BIT, tbit);
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_SHAD:
@@ -8487,6 +8510,9 @@ static void disassemble_nm_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_NM_ADDC:
 		printf("ADDC R%u,R%u\n", m, n);
+		return;
+	case INSN_NM_ADDV:
+		printf("ADDV R%u,R%u\n", m, n);
 		return;
 	case INSN_NM_SHAD:
 		printf("SHAD R%u,R%u\n", m, n);
