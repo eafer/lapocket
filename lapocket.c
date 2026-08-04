@@ -4618,7 +4618,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 		return SDL_APP_FAILURE;
 	}
 	/* TODO: allow window resizing, use the renderer? */
-	if (!SDL_CreateWindowAndRenderer("La Pocket", DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
+	if (!SDL_CreateWindowAndRenderer("La Pocket", DISPLAY_FB_WIDTH << 1, DISPLAY_FB_HEIGHT << 1, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
 		fprintf(stderr, "%s: failed to create the window (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
