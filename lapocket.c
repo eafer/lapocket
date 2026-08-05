@@ -4917,7 +4917,7 @@ static int write_scif_byte_reg(uint32_t addr, uint8_t val)
 		/* TODO: exception or something? Not documented */
 		return 0;
 	case SCIF_SCFCR2_OFF:
-		if (val & ~(SCFCR2_RFRST | SCFCR2_TFRST))
+		if (val & ~(SCFCR2_RFRST | SCFCR2_TFRST | SCFCR2_RTRG1 | SCFCR2_RTRG0 | SCFCR2_TTRG1 | SCFCR2_TTRG0))
 			return panic("Unsupported control command for SCIF FIFO (0x%.4x)\n", val);
 		if (val & SCFCR2_RFRST)
 			scif.SCFRDR2_count = 0;
@@ -9004,6 +9004,44 @@ static void update_clocks(void)
 	}
 }
 
+static uint8_t scif_receive_triggers(void)
+{
+	uint8_t rtrg;
+
+	rtrg = (scif.SCFCR2 & (SCFCR2_RTRG1 | SCFCR2_RTRG0)) >> 6;
+	switch (rtrg) {
+	case 0:
+		return 1;
+	case 1:
+		return 4;
+	case 2:
+		return 8;
+	case 3:
+		return 14;
+	default:
+		return panic("BUG: impossible SCIF RTRG setting\n");
+	}
+}
+
+static uint8_t scif_transmit_triggers(void)
+{
+	uint8_t ttrg;
+
+	ttrg = (scif.SCFCR2 & (SCFCR2_TTRG1 | SCFCR2_TTRG0)) >> 4;
+	switch (ttrg) {
+	case 0:
+		return 8;
+	case 1:
+		return 4;
+	case 2:
+		return 2;
+	case 3:
+		return 1;
+	default:
+		return panic("BUG: impossible SCIF TTRG setting\n");
+	}
+}
+
 static void scif_receive_single_char(void)
 {
 	char c;
@@ -9019,9 +9057,10 @@ static void scif_receive_single_char(void)
 		return;
 	memmove(&scif.SCFRDR2[1], &scif.SCFRDR2[0], scif.SCFRDR2_count++);
 	scif.SCFRDR2[0] = c;
-	/* The number of receive triggers is probably always 1 */
-	scif.SCSSR2 |= SCSSR2_RDF;
-	scif.SCSSR2_unread |= SCSSR2_RDF;
+	if (scif.SCFRDR2_count >= scif_receive_triggers()) {
+		scif.SCSSR2 |= SCSSR2_RDF;
+		scif.SCSSR2_unread |= SCSSR2_RDF;
+	}
 	/* TODO: serial interrupts? Are they even used by the jornada? */
 	/* TODO: break detection? */
 }
@@ -9035,9 +9074,12 @@ static void send_single_char(void)
 	/* TODO: send to an actual serial device */
 	console_monitor_save_byte(&serial_monitor, scif.SCFTDR2[--scif.SCFTDR2_count]);
 	if (scif.SCFTDR2_count == 0) {
-		/* TDFE should probably not be set (TODO) */
-		scif.SCSSR2 |= (SCSSR2_TEND | SCSSR2_TDFE);
-		scif.SCSSR2_unread |= (SCSSR2_TEND | SCSSR2_TDFE);
+		scif.SCSSR2 |= SCSSR2_TEND;
+		scif.SCSSR2_unread |= SCSSR2_TEND;
+	}
+	if (scif.SCFTDR2_count <= scif_transmit_triggers()) {
+		scif.SCSSR2 |= SCSSR2_TDFE;
+		scif.SCSSR2_unread |= SCSSR2_TDFE;
 	}
 }
 
