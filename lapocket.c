@@ -843,10 +843,13 @@ struct display {
 
 	/*
 	 * The actual rgba screen contents after applying the palette. Only updated
-	 * when it needs to get printed or displayed.
+	 * when it needs to get printed or displayed, and only if it changed since
+	 * the last update.
 	 */
 	uint32_t output[DISPLAY_FB_SIZE];
 } display = {0};
+
+static bool display_dirty = true;
 
 enum i2c_state {
 	I2C_STATE_STARTING,
@@ -1121,6 +1124,7 @@ static int display_write_byte_reg(uint32_t addr, uint8_t val)
 {
 	if (addr >= DISPLAY_FB_OFF && addr < DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
 		display.fb[addr - DISPLAY_FB_OFF] = val;
+		display_dirty = true;
 		return 0;
 	}
 
@@ -1128,6 +1132,7 @@ static int display_write_byte_reg(uint32_t addr, uint8_t val)
 	case DISPLAY_MODE_OFF:
 		notice("Display \"mode\" set to 0x%.2x\n", val);
 		display.mode = val;
+		display_dirty = true;
 		return 0;
 	case DISPLAY_PAL_IDX_OFF:
 		display.pal_idx = val;
@@ -1143,6 +1148,7 @@ static int display_write_byte_reg(uint32_t addr, uint8_t val)
 			/* May wrap around here - no idea what happens on hardware */
 			++display.pal_idx;
 		}
+		display_dirty = true;
 		return 0;
 	default:
 		if (addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
@@ -1183,6 +1189,10 @@ static void display_update_output_no_palette(void)
 static void display_update_output(void)
 {
 	int i;
+
+	if (!display_dirty)
+		return;
+	display_dirty = false;
 
 	if (display.mode & DISPLAY_BYPASS_PALETTE)
 		return display_update_output_no_palette();
@@ -5939,6 +5949,7 @@ static int write_word(uint32_t addr, uint16_t val)
 		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
 			return panic("Unsupported display register 0x%.8x\n", addr);
 		*(uint16_t *)(display.fb + (addr - DISPLAY_FB_OFF)) = val;
+		display_dirty = true;
 		return 0;
 	case MBOARD_REGS_OFF:
 		if (!is_motherboard_word_address(addr))
@@ -6029,6 +6040,7 @@ static int write_longword(uint32_t addr, uint32_t val)
 		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
 			return panic("Unsupported display register 0x%.8x\n", addr);
 		*(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF)) = val;
+		display_dirty = true;
 		return 0;
 	case 0xFF000000:
 	case 0xF0000000:
