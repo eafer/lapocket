@@ -8968,7 +8968,7 @@ static void update_clocks(void)
 		 * let's go with that for now. This CKS follows CKIO/16.
 		 */
 		cycle = 50 * 16;
-		if (nanosecs - bsc.pretime >= cycle) {
+		while (nanosecs - bsc.pretime >= cycle) {
 			bsc.pretime += cycle;
 			increment_bsc_rtcnt();
 		}
@@ -8984,7 +8984,7 @@ static void update_clocks(void)
 		if ((tmu.TCR[i] & TCR_TPSC) == 4) {
 			/* The real-time clock has a frequency of 32.768 kHz */
 			cycle = 30517LL * TMU_PRETIME_MULT;
-			if (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
+			while (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
 				tmu.pretime[i] += cycle;
 				decrement_tmu_tcnt(i);
 			}
@@ -8994,7 +8994,7 @@ static void update_clocks(void)
 			 * looking at <8003BB0C>).
 			 */
 			cycle = 45211243LL * tmu_prescaler(i);
-			if (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
+			while (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
 				tmu.pretime[i] += cycle;
 				decrement_tmu_tcnt(i);
 			}
@@ -9006,7 +9006,7 @@ static void update_clocks(void)
 
 	/* R64CNT updates at 64 Hz */
 	cycle = 15625000;
-	if (nanosecs - rtc.pretime >= cycle) {
+	while (nanosecs - rtc.pretime >= cycle) {
 		rtc.pretime += cycle;
 		/* TODO: update the seconds on overflow, and so on... */
 		if (++rtc.R64CNT == 64) {
