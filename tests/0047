@@ -4,8 +4,8 @@ monitor notice off
 monitor xb3a off
 
 # Boot and run until the user gets prompted to tap the screen. The exact wait
-# time in spoofed time is hard to predict, but apparently 16 seconds is enough.
-wait 16000
+# time in spoofed time is hard to predict, but apparently 20 seconds is enough.
+wait 20000
 
 # Tap the screen to reach the calibration prompt
 input pen 10,10

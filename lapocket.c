@@ -8937,6 +8937,8 @@ static void set_debugger_nanosecs_sdl()
 #endif
 }
 
+static long long last_clock_update = 0;
+
 /*
  * We want the tests to be deterministic so, when running headless, the clock
  * update frequency is arbitrarily synced to the execution loop. All that
@@ -8958,6 +8960,15 @@ static void update_clocks(void)
 	} else {
 		set_nanosecs_sdl();
 	}
+
+	/*
+	 * This function becomes a big bottleneck if it runs after every single
+	 * instruction, so make clock updates as a big batch instead. We skip many
+	 * intermediate states but I don't think that matters...
+	 */
+	if (nanosecs - last_clock_update <= 3000)
+		return;
+	last_clock_update = nanosecs;
 
 	switch (bsc.RTCSR & RTCSR_CKS) {
 	case 0x0000:
@@ -10622,6 +10633,7 @@ struct struct_layout {
 } dump_layout[] = {
 	{memory, sizeof(memory)},
 	{&nanosecs, sizeof(nanosecs)},
+	{&last_clock_update, sizeof(last_clock_update)},
 	{&motherboard, sizeof(motherboard)},
 	{&battery, sizeof(battery)},
 	{&touchscreen, sizeof(touchscreen)},
