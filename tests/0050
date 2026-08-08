@@ -31,17 +31,17 @@ input pen 19,55
 wait 100
 input pen up
 wait 5000
-print CRC
+print --bottom CRC
 
 # Save the state at 5 seconds and let it run for 5 more
 save bin/0050.dump
 wait 5000
-print CRC
+print --bottom CRC
 
 # Restore to 5 seconds and run for 5 more again
 load bin/0050.dump
-print CRC
+print --bottom CRC
 wait 5000
-print CRC
+print --bottom CRC
 
 exit

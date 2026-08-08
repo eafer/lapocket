@@ -10574,31 +10574,52 @@ static int crc_command_handler(int argc, const char **argv)
  *
  * With the --raw argument, the print command will ignore the palette (which may
  * not have been set up) and just dump the framebuffer to the output file.
+ *
+ * With the --bottom argument, only a few bottom rows will get printed (TODO:
+ * allow pick of rectangle).
  */
 static int print_command_handler(int argc, const char **argv)
 {
 	FILE *file = NULL;
 	uint8_t *output = NULL;
-	size_t outlen;
+	size_t outlen, toplen;
 	const char *path = NULL;
 	size_t ret;
+	bool bottom, raw;
+	int i;
 
-	if (argc == 3) {
-		if (strcmp(argv[1], "--raw") != 0) {
-			printf("Invalid print command: too many arguments\n");
-			return CLI_CONTINUE;
-		}
-		path = argv[2];
-		output = display.fb;
-		outlen = DISPLAY_FB_SIZE;
-	} else if (argc == 2) {
-		path = argv[1];
-		output = (uint8_t *)display.output;
-		outlen = sizeof(display.output);
-	} else {
+	bottom = false;
+	raw = false;
+	for (i = 1; i < argc; ++i) {
+		if (strcmp(argv[i], "--raw") == 0)
+			raw = true;
+		else if (strcmp(argv[i], "--bottom") == 0)
+			bottom = true;
+		else
+			break;
+	}
+
+	if (i == argc) {
 		printf("Invalid print command: target file missing\n");
 		return CLI_CONTINUE;
 	}
+	path = argv[i];
+	if (++i != argc) {
+		printf("Invalid print command: too many arguments\n");
+		return CLI_CONTINUE;
+	}
+
+	if (raw) {
+		output = display.fb;
+		outlen = DISPLAY_FB_SIZE;
+		toplen = bottom ? DISPLAY_FB_WIDTH * (DISPLAY_FB_HEIGHT - 50) * sizeof(display.fb[0]): 0;
+	} else {
+		output = (uint8_t *)display.output;
+		outlen = sizeof(display.output);
+		toplen = bottom ? DISPLAY_FB_WIDTH * (DISPLAY_FB_HEIGHT - 50) * sizeof(display.output[0]) : 0;
+	}
+	output += toplen;
+	outlen -= toplen;
 
 	display_update_output();
 
