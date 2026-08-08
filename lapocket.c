@@ -9548,7 +9548,6 @@ static int run(void)
 		/* This can change the PC, so do it before the breakpoint check */
 		exception_check();
 
-		/* TODO: actually sleep instead of looping around interrupt checks */
 		if (!(cpu.extra_state & EXTRA_POWER_DOWN)) {
 			delayed_slot = cpu.extra_state & EXTRA_IN_DELAYED;
 			pc = delayed_slot ? cpu.delayed_pc : cpu.PC;
@@ -9609,9 +9608,12 @@ static int run(void)
 			static unsigned int last_refresh = 0;
 			unsigned int now;
 
-			/* Return regularly to refresh the screen and check for input */
+			/*
+			 * Return regularly to refresh the screen and check for input. Also
+			 * offer to yield execution for real during sleep.
+			 */
 			now = SDL_GetTicks();
-			if (now - last_refresh >= 16) {
+			if (cpu.extra_state & EXTRA_POWER_DOWN || now - last_refresh >= 16) {
 				/* 60 hz, seems reasonable */
 				refresh_time = true;
 				last_refresh = now;
