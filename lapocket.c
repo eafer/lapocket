@@ -4090,9 +4090,9 @@ struct mmu_cache_line {
 };
 
 /*
- * The emulator's mmu cache saves one mapping for each of read/write and each
- * acccess width. This attempts to strike a balance between skipping as many
- * calls to mmu_virt_to_phys() as possible and not making the cache lookup
+ * The emulator's mmu cache saves one mapping for each of read/write/execute and
+ * each acccess width. This attempts to strike a balance between skipping as
+ * many calls to mmu_virt_to_phys() as possible and not making the cache lookup
  * itself too expensive.
  *
  * Of course the mappings depend on the current process and privilege level as
@@ -4101,6 +4101,12 @@ struct mmu_cache_line {
  */
 struct mmu_cache {
 	struct mmu_cache_line lines[mca_count];
+	/*
+	 * Instruction fetches are the most common by far, and never go to a
+	 * register, so we keep the actual pointer as an extra optimization.
+	 */
+	uint32_t insn_va;
+	uint8_t *insn_p;
 } mmu_cache = {0};
 
 static void mmu_cache_invalidate(void)
@@ -4109,6 +4115,7 @@ static void mmu_cache_invalidate(void)
 
 	for (i = 0; i < mca_count; ++i)
 		mmu_cache.lines[i].va = -1;
+	mmu_cache.insn_va = -1;
 }
 
 static bool is_mmu_longword_address(uint32_t addr)
@@ -5822,6 +5829,49 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 		break;
 	}
 	return panic("Attempted read of unknown address 0x%.8x\n", addr);
+}
+
+static int read_word_insn(uint32_t addr, uint16_t *val_p)
+{
+	uint8_t *insn_p = NULL;
+	uint32_t va, pa;
+
+	if (addr & 1) {
+		cpu.extra_state |= EXTRA_READ_ADDR_ERROR;
+		cpu.tlb_exception_addr = addr;
+		return 1;
+	}
+	addr = mock_va_translation(addr);
+
+	va = addr;
+	if ((va & PAGE_MASK) == mmu_cache.insn_va) {
+		/* Note that this check always fails for invalid cache lines */
+		*val_p = *(uint16_t *)(mmu_cache.insn_p + (va & ~PAGE_MASK));
+		return 0;
+	}
+
+	if (mmu_virt_to_phys(addr, &pa, false /* write */))
+		return 1;
+	addr = pa;
+	addr = p1_p2_to_phys(addr);
+
+	switch (addr & 0xFF000000) {
+	case FIRMWARE_OFF:
+	case BOOTLOADER_OFF:
+		insn_p = firmware + (addr & FIRMWARE_MASK);
+		break;
+	case MEMORY_OFF:
+	case MEMORY_SHADOW:
+		insn_p = memory + (addr & MEMORY_MASK);
+		break;
+	default:
+		return panic("Attempted instruction fetch from address 0x%.8x\n", addr);
+	}
+
+	*val_p = *(uint16_t *)insn_p;
+	mmu_cache.insn_va = va & PAGE_MASK;
+	mmu_cache.insn_p = insn_p - (va & ~PAGE_MASK);
+	return 0;
 }
 
 static int read_longword(uint32_t addr, uint32_t *val_p)
@@ -8116,7 +8166,7 @@ static int read_insn(uint32_t pc, uint16_t *insn_p)
 			return 0;
 		}
 	}
-	return read_word(pc, insn_p);
+	return read_word_insn(pc, insn_p);
 }
 
 /* Execute the instruction at @pc */
