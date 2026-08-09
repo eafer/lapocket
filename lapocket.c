@@ -4072,6 +4072,45 @@ struct mmu {
 #define TLB_C				(0x000001U << 1)	/* Cacheable bit */
 #define TLB_D				(0x000001U << 0)	/* Dirty bit */
 
+#define PAGE_MASK			(~((1 << 10) - 1))
+
+enum mmu_cache_access {
+	mca_r8,
+	mca_r16,
+	mca_r32,
+	mca_w8,
+	mca_w16,
+	mca_w32,
+	mca_count,
+};
+
+struct mmu_cache_line {
+	uint32_t va;	/* Virtual address of page (-1 if invalid) */
+	uint32_t pa;	/* Physical address of page */
+};
+
+/*
+ * The emulator's mmu cache saves one mapping for each of read/write and each
+ * acccess width. This attempts to strike a balance between skipping as many
+ * calls to mmu_virt_to_phys() as possible and not making the cache lookup
+ * itself too expensive.
+ *
+ * Of course the mappings depend on the current process and privilege level as
+ * well as the actual contents of the mmu, so the whole thing gets invalidated
+ * whenever any of those change.
+ */
+struct mmu_cache {
+	struct mmu_cache_line lines[mca_count];
+} mmu_cache = {0};
+
+static void mmu_cache_invalidate(void)
+{
+	enum mmu_cache_access i;
+
+	for (i = 0; i < mca_count; ++i)
+		mmu_cache.lines[i].va = -1;
+}
+
 static bool is_mmu_longword_address(uint32_t addr)
 {
 	if (addr >= MMU_TLB_ADDR_OFF && addr < MMU_TLB_ADDR_OFF + MMU_TLB_ADDR_LEN)
@@ -4148,11 +4187,14 @@ static int mmu_load_pte_to_tlb(void)
 
 	*tlb_addr_p = tlb_addr;
 	*tlb_data_p = tlb_data;
+	mmu_cache_invalidate();
 	return 0;
 }
 
 static int mmu_write_longword_reg(uint32_t addr, uint32_t val)
 {
+	mmu_cache_invalidate();
+
 	switch (addr) {
 	case MMU_PTEH_OFF:
 		mmu.PTEH = val & PTEH_BIT_MASK;
@@ -5607,6 +5649,25 @@ static int except_read_longword_reg(uint32_t addr, uint32_t *val_p)
 	}
 }
 
+static int mmu_virt_to_phys_through_cache(uint32_t va, uint32_t *pa, enum mmu_cache_access access)
+{
+	struct mmu_cache_line *line = NULL;
+
+	line = &mmu_cache.lines[access];
+
+	if ((va & PAGE_MASK) == line->va) {
+		/* Note that this check always fails for invalid cache lines */
+		*pa = line->pa + (va & ~PAGE_MASK);
+		return 0;
+	}
+
+	if (mmu_virt_to_phys(va, pa, access >= mca_w8))
+		return 1;
+	line->va = va & PAGE_MASK;
+	line->pa = *pa & PAGE_MASK;
+	return 0;
+}
+
 static bool addr_is_watchpoint(uint32_t addr, bool write);
 
 static int read_byte(uint32_t addr, uint8_t *val_p)
@@ -5614,7 +5675,7 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 	uint32_t pa;
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa, false /* write */))
+	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r8))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5695,7 +5756,7 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 		return 1;
 	}
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa, false /* write */))
+	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r16))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5773,7 +5834,7 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 		return 1;
 	}
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa, false /* write */))
+	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r32))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5837,7 +5898,7 @@ static int write_byte(uint32_t addr, uint8_t val)
 	uint32_t pa;
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa, true /* write */))
+	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_w8))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -5926,7 +5987,7 @@ static int write_word(uint32_t addr, uint16_t val)
 		return panic("Unaligned word write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa, true /* write */))
+	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_w16))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -6016,7 +6077,7 @@ static int write_longword(uint32_t addr, uint32_t val)
 		return panic("Unaligned longword write to 0x%.8x\n", addr);
 
 	addr = mock_va_translation(addr);
-	if (mmu_virt_to_phys(addr, &pa, true /* write */))
+	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_w32))
 		return 1;
 	addr = pa;
 	addr = p1_p2_to_phys(addr);
@@ -6478,6 +6539,7 @@ static void reset(void)
 	cpu.SR |= SR_RB_BIT;
 	cpu.SR |= SR_BL_BIT;
 	cpu.SR |= SR_I_BITS;
+	mmu_cache_invalidate();
 	cpu.VBR = 0x00000000;
 	cpu.EXPEVT = 0x00000000;
 
@@ -6708,6 +6770,7 @@ static int execute_0_format(uint32_t pc, uint16_t insn)
 			backtrace_push(0, cpu.SPC + 4, false /* exception */);
 		}
 		cpu.SR = cpu.SSR;
+		mmu_cache_invalidate();
 		return prepare_delayed_slot(cpu.SPC + 4);
 	case INSN_0_SETT:
 		cpu.SR |= SR_T_BIT;
@@ -7113,6 +7176,7 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 		 * make much sense and it quickly leads to trouble with the firmware.
 		 */
 		cpu.SR = read_gp_register(m) & SR_BIT_MASK;
+		mmu_cache_invalidate();
 		cpu.PC += 2;
 		return 0;
 	case INSN_M_LDSMMACH:
@@ -7138,6 +7202,7 @@ static int execute_m_format(uint32_t pc, uint16_t insn)
 			return 1;
 		/* Same as LDCSR, the manual's pseudocode looks wrong to me */
 		cpu.SR = data32 & SR_BIT_MASK;
+		mmu_cache_invalidate();
 		write_gp_register(m, mval + 4);
 		cpu.PC += 2;
 		return 0;
@@ -7847,6 +7912,7 @@ static int execute_d_format(uint32_t pc, uint16_t insn)
 		 */
 		cpu.SPC = (cpu.PC + 2) - 4;
 		cpu.SR |= (SR_BL_BIT | SR_RB_BIT | SR_MD_BIT);
+		mmu_cache_invalidate();
 		cpu.EXPEVT = 0x160;
 		/* The manual seems to be missing the "+4" here... */
 		cpu.PC = cpu.VBR + 0x0100 + 4;
@@ -9244,6 +9310,7 @@ static void irq_accept(int i, int priority)
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	cpu.PC = cpu.VBR + 0x600 + 4;
 	cpu.INTEVT = priority_to_intevt(priority);
 	cpu.INTEVT2 = 0x600 + i * 0x20;
@@ -9256,6 +9323,7 @@ static void pint_accept(int i, int priority)
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	cpu.PC = cpu.VBR + 0x600 + 4;
 	cpu.INTEVT = priority_to_intevt(priority);
 	cpu.INTEVT2 = 0x700 + i * 0x20;
@@ -9268,6 +9336,7 @@ static void tuni_accept(int i, int priority)
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	cpu.PC = cpu.VBR + 0x600 + 4;
 	cpu.INTEVT = 0x400 + i * 0x20;
 	cpu.INTEVT2 = 0x400 + i * 0x20;
@@ -9446,6 +9515,7 @@ static void tlb_miss_accept(void)
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	mmu_update_rc_after_miss(cpu.tlb_exception_addr);
 	cpu.PC = cpu.VBR + 0x400 + 4;
 
@@ -9462,6 +9532,7 @@ static void tlb_invalid_accept(void)
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
 	cpu.extra_state &= ~EXTRA_TLB_INVALID;
@@ -9476,6 +9547,7 @@ static void initial_page_write_accept(void)
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	mmu_set_rc(cpu.tlb_exception_way);
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
@@ -9489,6 +9561,7 @@ static void reserved_instruction_accept(void)
 	cpu.SSR = cpu.SR;
 	cpu.EXPEVT = 0x180;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
 	cpu.extra_state &= ~EXTRA_RESERVED_INSN;
@@ -9502,6 +9575,7 @@ static void address_error_accept(void)
 	cpu.SSR = cpu.SR;
 	cpu.EXPEVT = 0x0E0;	/* Only reads supported, for now */
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
 	cpu.extra_state &= ~EXTRA_READ_ADDR_ERROR;
@@ -9516,6 +9590,7 @@ static void protection_violation_accept(void)
 	cpu.SPC = cpu.PC - 4;
 	cpu.SSR = cpu.SR;
 	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
 	mmu_set_rc(cpu.tlb_exception_way);
 	cpu.PC = cpu.VBR + 0x100 + 4;
 
@@ -10753,9 +10828,11 @@ static int load_command_handler(int argc, const char **argv)
 		if (ret != dump_layout[i].size) {
 			printf("load: read failed\n");
 			fclose(file);
+			/* TODO: should actually exit on failure... */
 			return CLI_CONTINUE;
 		}
 	}
+	mmu_cache_invalidate();
 
 	if (fclose(file)) {
 		perror("load");
