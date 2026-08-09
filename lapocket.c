@@ -8869,26 +8869,29 @@ static void increment_bsc_rfcr(void)
 }
 
 /* Increment the RTCNT bsc register */
-static void increment_bsc_rtcnt(void)
+static void increment_bsc_rtcnt(unsigned int inc)
 {
-	bsc.RTCNT += 1;
-	if (bsc.RTCNT == bsc.RTCOR) {
+	while ((uint16_t)(bsc.RTCOR - bsc.RTCNT) <= inc) {
+		inc -= (uint16_t)(bsc.RTCOR - bsc.RTCNT);
 		bsc.RTCNT = 0;
 		bsc.RTCSR |= RTCSR_CMF;
 		if (bsc.RTCSR & RTCSR_CMIE)
 			(void)panic("Interrupt from CMF not implemented\n");
 		increment_bsc_rfcr();
 	}
+	bsc.RTCNT += inc;
 }
 
 /* Decrement the TCNT0-2 TMU register */
-static void decrement_tmu_tcnt(int i)
+static void decrement_tmu_tcnt(int i, unsigned int dec)
 {
-	tmu.TCNT[i] -= 1;
-	if (tmu.TCNT[i] == 0xFFFFFFFFU) {
+	while (tmu.TCNT[i] < dec) {
+		dec -= tmu.TCNT[i];
+		--dec;
 		tmu.TCNT[i] = tmu.TCOR[i];
 		tmu.TCR[i] |= TCR_UNF;
 	}
+	tmu.TCNT[i] -= dec;
 }
 
 /* Get the prescale value for the TCNT0-2 clocks */
@@ -8948,6 +8951,7 @@ static long long last_clock_update = 0;
 static void update_clocks(void)
 {
 	long long cycle;
+	unsigned int cycle_count;
 	int i;
 
 	if (headless) {
@@ -8979,10 +8983,9 @@ static void update_clocks(void)
 		 * let's go with that for now. This CKS follows CKIO/16.
 		 */
 		cycle = 50 * 16;
-		while (nanosecs - bsc.pretime >= cycle) {
-			bsc.pretime += cycle;
-			increment_bsc_rtcnt();
-		}
+		cycle_count = (nanosecs - bsc.pretime) / cycle;
+		bsc.pretime += cycle_count * cycle;
+		increment_bsc_rtcnt(cycle_count);
 		break;
 	default:
 		(void)panic("RTCNT clock input 0x%x not implemented\n", bsc.RTCSR & RTCSR_CKS);
@@ -8995,20 +8998,18 @@ static void update_clocks(void)
 		if ((tmu.TCR[i] & TCR_TPSC) == 4) {
 			/* The real-time clock has a frequency of 32.768 kHz */
 			cycle = 30517LL * TMU_PRETIME_MULT;
-			while (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
-				tmu.pretime[i] += cycle;
-				decrement_tmu_tcnt(i);
-			}
+			cycle_count = (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i]) / cycle;
+			tmu.pretime[i] += cycle_count * cycle;
+			decrement_tmu_tcnt(i, cycle_count);
 		} else if ((tmu.TCR[i] & TCR_TPSC) < 4) {
 			/*
 			 * The peripheral clock is set to ~22.12Mhz (or so it seems from
 			 * looking at <8003BB0C>).
 			 */
 			cycle = 45211243LL * tmu_prescaler(i);
-			while (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i] >= cycle) {
-				tmu.pretime[i] += cycle;
-				decrement_tmu_tcnt(i);
-			}
+			cycle_count = (TMU_PRETIME_MULT * nanosecs - tmu.pretime[i]) / cycle;
+			tmu.pretime[i] += cycle_count * cycle;
+			decrement_tmu_tcnt(i, cycle_count);
 		} else {
 			(void)panic("TMU timer prescaler 0x%x not implemented\n", tmu.TCR[i] & TCR_TPSC);
 			return;
