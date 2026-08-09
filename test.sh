@@ -15,9 +15,10 @@ firmware=$1
 dumpfile=/tmp/lapocket-dump.tmp
 errfile=/tmp/lapocket-err.tmp
 cardfile=/tmp/lapocket-card.tmp
+exefile=/tmp/lapocket-exe.tmp
 
 cleanup () {
-	rm -f $dumpfile $errfile $cardfile
+	rm -f $dumpfile $errfile $cardfile $exefile
 }
 trap cleanup EXIT
 
@@ -26,6 +27,9 @@ fail () {
 	mv $errfile ../failure.out
 	exit 1
 }
+
+# Preserve the executable in case it changes during the tests
+cp ./lapocket "$exefile"
 
 touch "$cardfile"
 truncate -s 256M "$cardfile"
@@ -37,9 +41,9 @@ for filename in *.out; do
 	echo -n "${filename%.out}... "
 	# TODO: fully support the card in all tests
 	if [ "$filename" = "0027.out" ]; then
-		../lapocket --headless -f ${filename%.out} -C $cardfile $firmware > $dumpfile 2>$errfile || fail
+		"$exefile" --headless -f ${filename%.out} -C $cardfile $firmware > $dumpfile 2>$errfile || fail
 	else
-		../lapocket --headless -f ${filename%.out} $firmware > $dumpfile 2>$errfile || fail
+		"$exefile" --headless -f ${filename%.out} $firmware > $dumpfile 2>$errfile || fail
 	fi
 	diff $filename $dumpfile > $errfile 2>&1 || fail
 	echo "SUCCESS"
