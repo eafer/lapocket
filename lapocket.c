@@ -8937,8 +8937,22 @@ static void increment_bsc_rfcr(void)
 /* Increment the RTCNT bsc register */
 static void increment_bsc_rtcnt(unsigned int inc)
 {
-	while ((uint16_t)(bsc.RTCOR - bsc.RTCNT) <= inc) {
-		inc -= (uint16_t)(bsc.RTCOR - bsc.RTCNT);
+	unsigned int dist;
+
+	while (true) {
+		dist = bsc.RTCOR - bsc.RTCNT;
+
+		/*
+		 * RTCOR and RTCNT may have been initialized with the same value (they
+		 * are both zero on boot for example). I'm not entirely sure what
+		 * should happen here but this looks somewhat sensible.
+		 */
+		if (dist == 0)
+			dist = 1 << 16;
+
+		if (dist > inc)
+			break;
+		inc -= dist;
 		bsc.RTCNT = 0;
 		bsc.RTCSR |= RTCSR_CMF;
 		if (bsc.RTCSR & RTCSR_CMIE)
