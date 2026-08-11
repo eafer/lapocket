@@ -9778,18 +9778,16 @@ static int run(void)
 		}
 #ifdef HAVE_SDL
 		{
-			static unsigned int last_refresh = 0;
-			unsigned int now;
+			static long long last_refresh = 0;
 
 			/*
 			 * Return regularly to refresh the screen and check for input. Also
 			 * offer to yield execution for real during sleep.
 			 */
-			now = SDL_GetTicks();
-			if (cpu.extra_state & EXTRA_POWER_DOWN || now - last_refresh >= 16) {
+			if (cpu.extra_state & EXTRA_POWER_DOWN || nanosecs - last_refresh >= 16 * 1000 * 1000) {
 				/* 60 hz, seems reasonable */
 				refresh_time = true;
-				last_refresh = now;
+				last_refresh = nanosecs;
 				ret = 0;
 				break;
 			}
