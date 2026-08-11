@@ -9050,6 +9050,24 @@ static void set_nanosecs_sdl(void)
 	}
 	/* Don't count time while the emulation is frozen */
 	nanosecs = now - debugger_nanosecs;
+
+# if 0
+	{
+		static long long last = 0;
+		static long long count = 0;
+
+		if (last == 0)
+			last = nanosecs;
+
+		count += 500;
+		if (count == 100000000) {
+			printf("Average instruction time: %llu\n", (nanosecs - last) / count);
+			count = 0;
+			last = nanosecs;
+		}
+	}
+# endif
+
 #else
 	(void)debugger_nanosecs;
 #endif
@@ -9070,8 +9088,6 @@ static void set_debugger_nanosecs_sdl()
 #endif
 }
 
-static long long last_clock_update = 0;
-
 /*
  * We want the tests to be deterministic so, when running headless, the clock
  * update frequency is arbitrarily synced to the execution loop. All that
@@ -9080,9 +9096,24 @@ static long long last_clock_update = 0;
  */
 static void update_clocks(void)
 {
+	static unsigned int throttle = 0;
 	long long cycle;
 	unsigned int cycle_count;
 	int i;
+
+	/*
+	 * This function becomes a big bottleneck if it runs after every single
+	 * instruction, so make clock updates as a big batch instead. We skip many
+	 * intermediate states but I don't think that matters... Note that SLEEP
+	 * differs from the other instructions because a much longer time may have
+	 * passed, and we want to wake up as soon as possible.
+	 *
+	 * TODO: picking a shorter divisor such as 200 triggers some sort of bug
+	 * which makes boot much slower.
+	 */
+	if (!(cpu.extra_state & EXTRA_POWER_DOWN) && ++throttle != 500)
+		return;
+	throttle = 0;
 
 	if (headless) {
 		/*
@@ -9090,19 +9121,10 @@ static void update_clocks(void)
 		 * per instruction. Arbitrary, of course, so it's ok to change it if
 		 * it's a problem later on.
 		 */
-		nanosecs += 20;
+		nanosecs += 20 * 500;
 	} else {
 		set_nanosecs_sdl();
 	}
-
-	/*
-	 * This function becomes a big bottleneck if it runs after every single
-	 * instruction, so make clock updates as a big batch instead. We skip many
-	 * intermediate states but I don't think that matters...
-	 */
-	if (nanosecs - last_clock_update <= 3000)
-		return;
-	last_clock_update = nanosecs;
 
 	switch (bsc.RTCSR & RTCSR_CKS) {
 	case 0x0000:
@@ -10794,7 +10816,6 @@ struct struct_layout {
 } dump_layout[] = {
 	{memory, sizeof(memory)},
 	{&nanosecs, sizeof(nanosecs)},
-	{&last_clock_update, sizeof(last_clock_update)},
 	{&motherboard, sizeof(motherboard)},
 	{&battery, sizeof(battery)},
 	{&touchscreen, sizeof(touchscreen)},
