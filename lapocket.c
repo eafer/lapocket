@@ -9710,6 +9710,7 @@ static void exception_check(void)
 /* The step count is in the remaining_steps global (-1 means forever) */
 static int run(void)
 {
+	static long long last_refresh = 0;
 	bool forever = remaining_steps < 0;
 	bool delayed_slot;
 	uint32_t pc, old_pc;
@@ -9776,23 +9777,18 @@ static int run(void)
 			ret = 0;
 			break;
 		}
-#ifdef HAVE_SDL
-		{
-			static long long last_refresh = 0;
 
-			/*
-			 * Return regularly to refresh the screen and check for input. Also
-			 * offer to yield execution for real during sleep.
-			 */
-			if (cpu.extra_state & EXTRA_POWER_DOWN || nanosecs - last_refresh >= 16 * 1000 * 1000) {
-				/* 60 hz, seems reasonable */
-				refresh_time = true;
-				last_refresh = nanosecs;
-				ret = 0;
-				break;
-			}
+		/*
+		 * Return regularly to refresh the screen and check for input. Also
+		 * offer to yield execution for real during sleep.
+		 */
+		if (cpu.extra_state & EXTRA_POWER_DOWN || nanosecs - last_refresh >= 16 * 1000 * 1000) {
+			/* 60 hz, seems reasonable */
+			refresh_time = true;
+			last_refresh = nanosecs;
+			ret = 0;
+			break;
 		}
-#endif
 	}
 
 	running = false;
