@@ -4950,6 +4950,8 @@ static int write_scif_word_reg(uint32_t addr, uint16_t val)
 	}
 }
 
+static void send_single_char(void);
+
 static int write_scif_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
@@ -4970,6 +4972,12 @@ static int write_scif_byte_reg(uint32_t addr, uint8_t val)
 		memmove(&scif.SCFTDR2[1], &scif.SCFTDR2[0], scif.SCFTDR2_count++);
 		scif.SCFTDR2[0] = val;
 		scif.SCSSR2 &= ~(SCSSR2_TEND | SCSSR2_TDFE);
+		/*
+		 * I'd rather do this inside update_scif(), but that function isn't
+		 * called on every run() loop and so the output of some tests would
+		 * break in awkward places.
+		 */
+		send_single_char();
 		/* TODO: serial interrupts? Are they even used by the jornada? */
 		return 0;
 	case SCIF_SCFRDR2_OFF:
@@ -9088,6 +9096,9 @@ static void set_debugger_nanosecs_sdl()
 #endif
 }
 
+static void update_scif(void);
+static void update_top_light(void);
+
 /*
  * We want the tests to be deterministic so, when running headless, the clock
  * update frequency is arbitrarily synced to the execution loop. All that
@@ -9178,6 +9189,13 @@ static void update_clocks(void)
 			rtc.RCR1 |= RCR1_CF;
 		}
 	}
+
+	/*
+	 * These don't quite fit in here, but having them protected by this
+	 * function's throttle is a decent performance boost.
+	 */
+	update_scif();
+	update_top_light();
 }
 
 static uint8_t scif_receive_triggers(void)
@@ -9260,27 +9278,20 @@ static void send_single_char(void)
 }
 
 /*
- * The emulator just submits one byte over serial on each loop, and receives
- * one byte from its rx buffer every 80 loops.
+ * The emulator just receives one byte from its rx buffer on each clock update.
  */
 static void update_scif(void)
 {
-	static int loops = 0;
-
-	send_single_char();
-
 	/*
 	 * Code that reads from serial such as <0x80032090> seems to expect that
 	 * the RDF flag will always be set if data is available. The manual
 	 * disagrees: RDF only gets set when new data arrives. I'm guessing this
 	 * works for physical hardware because characters arrive slowly, and the
-	 * code the unsets the flag is much faster. Try to fake that here: waiting
-	 * 40 loops seems to work, so use 80 to be sure.
+	 * code the unsets the flag is much faster. To fake that here, it's a must
+	 * that this function is never called more than once every 40 execution
+	 * loops, or 80 to be safe.
 	 */
-	if (++loops == 80) {
-		loops = 0;
-		scif_receive_single_char();
-	}
+	scif_receive_single_char();
 }
 
 /*
@@ -9297,7 +9308,11 @@ static void update_top_light(void)
 		return;
 	}
 
-	if (++loops == 500000) {
+	/*
+	 * TODO: define a macro for the update_clocks() divisor, to make these
+	 * conversions more clear.
+	 */
+	if (++loops == 1000) {
 		loops = 0;
 		notice("Blink!\n");
 		/*
@@ -9755,8 +9770,6 @@ static int run(void)
 				cpu.extra_state &= ~EXTRA_IN_DELAYED;
 				cpu.delayed_pc = 0;
 			}
-			update_scif();
-			update_top_light();
 			if (!forever) {
 				if (--remaining_steps == 0) {
 					remaining_steps = -1;
