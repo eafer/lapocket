@@ -1,5 +1,7 @@
 # Run the self-tests for a CompactFlash memory card
 
+monitor notice on
+
 set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
 set R15 0x0C001000			# Mock a stack somewhere
 set l:0x8C009C20 0xb2000000	# This global points to the motherboard registers

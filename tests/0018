@@ -1,5 +1,7 @@
 # Sets up and tests a basic exception handler for TRAPA
 
+monitor notice on
+
 set l:0x8C009E68 0x80013ee4	# Needed for drawing glyphs on screen
 set R15 0x0C001000			# Mock a stack somewhere
 

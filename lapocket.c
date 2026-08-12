@@ -24,7 +24,7 @@ static void dump_all_monitors(void);
 #define MONITOR_XB3A_ENABLED	(1U << 3)
 #define MONITOR_PEN_ENABLED		(1U << 4)
 /* The eeprom i2c monitor is not very interesting so it's off by default */
-static uint8_t enabled_monitors = MONITOR_NOTICE_ENABLED | MONITOR_SERIAL_ENABLED | MONITOR_XB3A_ENABLED;
+static uint8_t enabled_monitors = MONITOR_SERIAL_ENABLED | MONITOR_XB3A_ENABLED;
 
 static void dump_cpu(void);
 static void print_backtrace(void);
