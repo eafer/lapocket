@@ -9055,23 +9055,6 @@ static void set_nanosecs_sdl(void)
 	/* Don't count time while the emulation is frozen */
 	nanosecs = now - debugger_nanosecs;
 
-# if 0
-	{
-		static long long last = 0;
-		static long long count = 0;
-
-		if (last == 0)
-			last = nanosecs;
-
-		count += 500;
-		if (count == 100000000) {
-			printf("Average instruction time: %llu\n", (nanosecs - last) / count);
-			count = 0;
-			last = nanosecs;
-		}
-	}
-# endif
-
 #else
 	(void)debugger_nanosecs;
 #endif
