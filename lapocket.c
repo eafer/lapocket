@@ -4876,6 +4876,7 @@ static uint32_t p1_p2_to_phys(uint32_t addr)
 	return addr;
 }
 
+/* TODO: for sanity, mappings should only be multiples of the page size */
 static uint32_t mock_va_translation(uint32_t addr)
 {
 	int i;
@@ -5676,6 +5677,7 @@ static int mmu_virt_to_phys_through_cache(uint32_t va, uint32_t *pa, enum mmu_ca
 		return 0;
 	}
 
+	va = mock_va_translation(va);
 	if (mmu_virt_to_phys(va, pa, access >= mca_w8))
 		return 1;
 	line->va = va & PAGE_MASK;
@@ -5689,7 +5691,6 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 {
 	uint32_t pa;
 
-	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r8))
 		return 1;
 	addr = pa;
@@ -5770,7 +5771,6 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 		cpu.tlb_exception_addr = addr;
 		return 1;
 	}
-	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r16))
 		return 1;
 	addr = pa;
@@ -5849,7 +5849,6 @@ static int read_word_insn(uint32_t addr, uint16_t *val_p)
 		cpu.tlb_exception_addr = addr;
 		return 1;
 	}
-	addr = mock_va_translation(addr);
 
 	va = addr;
 	if ((va & PAGE_MASK) == mmu_cache.insn_va) {
@@ -5858,6 +5857,7 @@ static int read_word_insn(uint32_t addr, uint16_t *val_p)
 		return 0;
 	}
 
+	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys(addr, &pa, false /* write */))
 		return 1;
 	addr = pa;
@@ -5891,7 +5891,6 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 		cpu.tlb_exception_addr = addr;
 		return 1;
 	}
-	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r32))
 		return 1;
 	addr = pa;
@@ -5955,7 +5954,6 @@ static int write_byte(uint32_t addr, uint8_t val)
 {
 	uint32_t pa;
 
-	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_w8))
 		return 1;
 	addr = pa;
@@ -6044,7 +6042,6 @@ static int write_word(uint32_t addr, uint16_t val)
 	if (addr & 1)
 		return panic("Unaligned word write to 0x%.8x\n", addr);
 
-	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_w16))
 		return 1;
 	addr = pa;
@@ -6134,7 +6131,6 @@ static int write_longword(uint32_t addr, uint32_t val)
 	if (addr & 3)
 		return panic("Unaligned longword write to 0x%.8x\n", addr);
 
-	addr = mock_va_translation(addr);
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_w32))
 		return 1;
 	addr = pa;
