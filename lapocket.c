@@ -40,6 +40,9 @@ static long long nanosecs = 0;
 /* Keep track of the time spent inside the debugger */
 static long long debugger_nanosecs = 0;
 
+static bool no_exception = true;
+static void exception_check_prepare(void);
+
 #ifdef __unix__
 #include <signal.h>
 
@@ -4440,6 +4443,8 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 	cpu.extra_state |= cpu_flag;
 	cpu.tlb_exception_way = way; /* Ignored for miss exceptions */
 	cpu.tlb_exception_addr = va;
+
+	no_exception = false;
 	return 1;
 }
 
@@ -5108,6 +5113,7 @@ static int tmu_write_word_reg(uint32_t addr, uint16_t val)
 		preserved_bits = val & TCR_UNSETTABLE_MASK;
 		val = (val & ~preserved_bits) | (*tcr & preserved_bits);
 		*tcr = val;
+		exception_check_prepare();
 		return 0;
 	default:
 		return panic("Attempted write to unsupported TMU register at 0x%.8x\n", addr);
@@ -5224,6 +5230,7 @@ static int intc_write_byte_reg(uint32_t addr, uint16_t val)
 		preserved_bits |= (IRR0_PINT0R | IRR0_PINT1R);
 		val = (val & ~preserved_bits) | (intc.IRR0 & preserved_bits);
 		intc.IRR0 = val;
+		exception_check_prepare();
 		return 0;
 	case INTC_IRR1_OFF:
 	case INTC_IRR2_OFF:
@@ -5264,6 +5271,8 @@ static void pint_refresh(void)
 	interrupt |= pint_detected(9);
 	interrupt |= pint_detected(8);
 	write_flag_to_byte(&intc.IRR0, IRR0_PINT1R, interrupt);
+
+	exception_check_prepare();
 }
 
 static int intc_write_word_reg(uint32_t addr, uint16_t val)
@@ -5769,6 +5778,7 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 	if (addr & 1) {
 		cpu.extra_state |= EXTRA_READ_ADDR_ERROR;
 		cpu.tlb_exception_addr = addr;
+		no_exception = false;
 		return 1;
 	}
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r16))
@@ -5847,6 +5857,7 @@ static int read_word_insn(uint32_t addr, uint16_t *val_p)
 	if (addr & 1) {
 		cpu.extra_state |= EXTRA_READ_ADDR_ERROR;
 		cpu.tlb_exception_addr = addr;
+		no_exception = false;
 		return 1;
 	}
 
@@ -5889,6 +5900,7 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 	if (addr & 3) {
 		cpu.extra_state |= EXTRA_READ_ADDR_ERROR;
 		cpu.tlb_exception_addr = addr;
+		no_exception = false;
 		return 1;
 	}
 	if (mmu_virt_to_phys_through_cache(addr, &pa, mca_r32))
@@ -8126,6 +8138,7 @@ static int execute_0uuu_format(uint32_t pc, uint16_t insn)
 		if (cpu.extra_state & EXTRA_IN_DELAYED)
 			return panic("Reserved instruction 0x%x in delay slot\n", insn);
 		cpu.extra_state |= EXTRA_RESERVED_INSN;
+		no_exception = false;
 		return 1;
 	}
 }
@@ -9156,6 +9169,7 @@ static void update_clocks(void)
 			(void)panic("TMU timer prescaler 0x%x not implemented\n", tmu.TCR[i] & TCR_TPSC);
 			return;
 		}
+		exception_check_prepare();
 	}
 
 	/* R64CNT updates at 64 Hz */
@@ -9529,6 +9543,11 @@ static void interrupt_accept(void)
 	accept_fn(max_num, max_priority);
 }
 
+static void exception_check_prepare(void)
+{
+	no_exception = !(cpu.extra_state & EXTRA_EXCEPTION) && !intc.IRR0 && !timer_underflow_interrupted();
+}
+
 static void interrupt_check(void)
 {
 	/* Interrupts only get accepted after the delay slot */
@@ -9540,9 +9559,6 @@ static void interrupt_check(void)
 	 * SR register is 1."
 	 */
 	if (!(cpu.extra_state & EXTRA_POWER_DOWN) && (cpu.SR & SR_BL_BIT))
-		return;
-
-	if (!intc.IRR0 && !timer_underflow_interrupted())
 		return;
 
 	/*
@@ -9680,6 +9696,14 @@ static void protection_violation_accept(void)
 
 static void exception_check(void)
 {
+	/*
+	 * This function runs after every instruction, and most of the time there
+	 * is no exception. Running all the checks one by one would get very
+	 * costly, so consolidate everything in a single boolean.
+	 */
+	if (no_exception)
+		return;
+
 	if (cpu.extra_state & EXTRA_EXCEPTION) {
 		if (cpu.SR & SR_BL_BIT) {
 			(void)panic("Exception (0x%.8x) got blocked\n", cpu.extra_state);
@@ -9698,7 +9722,13 @@ static void exception_check(void)
 		if (cpu.extra_state & EXTRA_TLB_PROTECTION)
 			return protection_violation_accept();
 	}
-	return interrupt_check();
+	/*
+	 * At this point we already know for sure that we got an interrupt, but we
+	 * still need to check that it isn't blocked.
+	 */
+	interrupt_check();
+
+	exception_check_prepare();
 }
 
 /* The step count is in the remaining_steps global (-1 means forever) */
@@ -10363,6 +10393,7 @@ static int input_qli_handler(int i, int argc, const char **argv)
 	 * and can confirm this.
 	 */
 
+	exception_check_prepare();
 	return CLI_CONTINUE;
 }
 
@@ -10413,6 +10444,7 @@ static int input_onoff_handler(int argc, const char **argv)
 			intc.IRR0 |= IRR0_IRQ1R;
 	}
 
+	exception_check_prepare();
 	return CLI_CONTINUE;
 }
 
@@ -10540,6 +10572,8 @@ static void pen_update(int x, int y)
 	if (touchscreen.x == -1)
 		return;
 	intc.IRR0 |= IRR0_IRQ3R;
+
+	exception_check_prepare();
 	return;
 }
 
@@ -10802,6 +10836,7 @@ struct struct_layout {
 } dump_layout[] = {
 	{memory, sizeof(memory)},
 	{&nanosecs, sizeof(nanosecs)},
+	{&no_exception, sizeof(no_exception)},
 	{&motherboard, sizeof(motherboard)},
 	{&battery, sizeof(battery)},
 	{&touchscreen, sizeof(touchscreen)},
