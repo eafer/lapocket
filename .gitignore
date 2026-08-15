@@ -8,3 +8,7 @@ failure.out
 *.gcov
 *.gcda
 *.gcno
+/index.html
+/index.js
+/index.wasm
+/firmware.bin
