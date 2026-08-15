@@ -4662,11 +4662,10 @@ static void reset(void);
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
+static SDL_Texture *texture = NULL;
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
-	SDL_Surface *win_surface = NULL;
-
 	if (parse_options(argc, argv))
 		return SDL_APP_FAILURE;
 	set_signal_handlers();
@@ -4681,22 +4680,36 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 		fprintf(stderr, "%s: failed to initialize SDL (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	/* TODO: allow window resizing, use the renderer? */
 	if (!SDL_CreateWindowAndRenderer("La Pocket", DISPLAY_FB_WIDTH << 1, DISPLAY_FB_HEIGHT << 1, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
 		fprintf(stderr, "%s: failed to create the window (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	win_surface = SDL_GetWindowSurface(window);
-	if (!win_surface) {
-		fprintf(stderr, "%s: failed to get window surface (%s)\n", progname, SDL_GetError());
+	if (!SDL_SetRenderLogicalPresentation(renderer, DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE)) {
+		fprintf(stderr, "%s: failed to set the logical presentation (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	if (!SDL_ClearSurface(win_surface, 1, 1, 1, 1)) {
-		fprintf(stderr, "%s: failed to clear window surface (%s)\n", progname, SDL_GetError());
+
+	/* The screen is black until we turn it on */
+	if (!SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE)) {
+		fprintf(stderr, "%s: failed to set the render draw color (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	if (!SDL_UpdateWindowSurface(window)) {
-		fprintf(stderr, "%s: failed to update window from surface (%s)\n", progname, SDL_GetError());
+	if (!SDL_RenderClear(renderer)) {
+		fprintf(stderr, "%s: failed to clear the render (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	if (!SDL_RenderPresent(renderer)) {
+		fprintf(stderr, "%s: failed to render to screen (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+
+	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT);
+	if (!texture) {
+		fprintf(stderr, "%s: failed to create texture (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST)) {
+		fprintf(stderr, "%s: failed to set the scale mode (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 
@@ -4706,86 +4719,46 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
 static void prompt_loop(void);
 
-/* Find the area of the window where the screen is actually drawn */
-static void get_display_area(SDL_Surface *win_surface, SDL_Rect *rect)
-{
-	rect->x = rect->y = 0;
-
-	if (win_surface->w * DISPLAY_FB_HEIGHT >= win_surface->h * DISPLAY_FB_WIDTH) {
-		rect->h = win_surface->h;
-		rect->w = (rect->h * DISPLAY_FB_WIDTH) / DISPLAY_FB_HEIGHT;
-	} else {
-		rect->w = win_surface->w;
-		rect->h = (rect->w * DISPLAY_FB_HEIGHT) / DISPLAY_FB_WIDTH;
-	}
-}
-
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
-	SDL_Surface *win_surface = NULL;
-	SDL_Surface *src = NULL;
-	SDL_Rect dest = {0};
-	SDL_AppResult err;
-
 	prompt_loop();
 	display_update_output();
 
-	src = SDL_CreateSurfaceFrom(DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, SDL_PIXELFORMAT_ABGR8888, display.output, DISPLAY_FB_WIDTH << 2);
-	if (!src) {
-		fprintf(stderr, "%s: failed to create framebuffer surface (%s)\n", progname, SDL_GetError());
-		err = SDL_APP_FAILURE;
-		goto out;
+	if (!SDL_RenderClear(renderer)) {
+		fprintf(stderr, "%s: failed to clear the render (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
 	}
-	win_surface = SDL_GetWindowSurface(window);
-	if (!win_surface) {
-		fprintf(stderr, "%s: failed to get window surface (%s)\n", progname, SDL_GetError());
-		err = SDL_APP_FAILURE;
-		goto out;
+	if (!SDL_UpdateTexture(texture, NULL, display.output, DISPLAY_FB_WIDTH << 2)) {
+		fprintf(stderr, "%s: failed to update the texture (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
 	}
-	get_display_area(win_surface, &dest);
-	/*
-	 * TODO: only allow scaling to multiples, maybe? I'm not at all convinced
-	 * by the result of any of the scalers.
-	 */
-	if (!SDL_BlitSurfaceScaled(src, NULL, win_surface, &dest, SDL_SCALEMODE_NEAREST)) {
-		fprintf(stderr, "%s: failed to blit surface (%s)\n", progname, SDL_GetError());
-		err = SDL_APP_FAILURE;
-		goto out;
+	if (!SDL_RenderTexture(renderer, texture, NULL, NULL)) {
+		fprintf(stderr, "%s: failed to render the texture (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
 	}
-	if (!SDL_UpdateWindowSurface(window)) {
-		fprintf(stderr, "%s: failed to update window from surface (%s)\n", progname, SDL_GetError());
-		err = SDL_APP_FAILURE;
-		goto out;
+	if (!SDL_RenderPresent(renderer)) {
+		fprintf(stderr, "%s: failed to render to screen (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
 	}
-	err = SDL_APP_CONTINUE;
-out:
-	SDL_DestroySurface(src);
-	return err;
+	return SDL_APP_CONTINUE;
 }
 
 static void pen_update(int x, int y);
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
-	SDL_Surface *win_surface = NULL;
-	SDL_Rect display = {0};
-	float scale;
-
 	if (event->type == SDL_EVENT_QUIT)
 		return SDL_APP_SUCCESS;
 
-	win_surface = SDL_GetWindowSurface(window);
-	if (!win_surface) {
-		fprintf(stderr, "%s: failed to get window surface (%s)\n", progname, SDL_GetError());
+	if (!SDL_ConvertEventToRenderCoordinates(renderer, event)) {
+		fprintf(stderr, "%s: failed to convert event coordinates (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	get_display_area(win_surface, &display);
-	scale = (float)DISPLAY_FB_WIDTH / display.w;
 
 	if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
-		pen_update(scale * event->button.x, scale * event->button.y);
+		pen_update(event->button.x, event->button.y);
 	} else if (event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
@@ -4793,7 +4766,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 	} else if (event->type == SDL_EVENT_MOUSE_MOTION) {
 		/* If the pen is already down, this is a drag */
 		if (touchscreen.x >= 0)
-			pen_update(scale * event->motion.x, scale * event->motion.y);
+			pen_update(event->motion.x, event->motion.y);
 	}
 
 	return SDL_APP_CONTINUE;
