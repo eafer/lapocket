@@ -3,9 +3,8 @@
 monitor notice off
 monitor xb3a off
 
-# Boot and run until we go to sleep waiting for the user to tap the screen
-break 0x800345da
+# Boot and run until we reach the screen that prompts the user for a tap
+wait 20000
 
-run
 print CRC
 exit

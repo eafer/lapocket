@@ -3,18 +3,12 @@
 monitor notice off
 monitor xb3a off
 
-# Boot and run until we go to sleep waiting for the user to tap the screen
-break 0x800345da
-run
+# Boot and run until we reach the screen that prompts the user for a tap
+wait 20000
 
-# After tapping the screen, clocks will wake us up from sleep several times
-# before the update finally happens
+# After tapping the screen, wait for the update to finally happen
 input pen 10,10
-run
-run
-run
-run
-run
+wait 1000
 
 print CRC
 exit

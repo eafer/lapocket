@@ -3328,6 +3328,9 @@ static int dmac_write_word_reg(uint32_t addr, uint16_t val)
 static int dmac_read_longword_reg(uint32_t addr, uint32_t *val_p)
 {
 	switch (addr) {
+	case DMAC_SAR0_OFF:
+		*val_p = dmac.SAR0;
+		return 0;
 	case DMAC_CHCR0_OFF:
 		*val_p = dmac.CHCR0;
 		return 0;
@@ -3342,6 +3345,7 @@ static int dmac_read_longword_reg(uint32_t addr, uint32_t *val_p)
 static int read_word(uint32_t addr, uint16_t *val_p);
 static int write_word(uint32_t addr, uint16_t val);
 static void set_dma_interrupt(void);
+static void clear_dma_interrupt(void);
 
 /*
  * Note that in reality dmac only happens when requested by the external (sound
@@ -3353,12 +3357,14 @@ static int dma_execute(void)
 	uint32_t src_step, dest_step;
 	uint16_t data16;
 
+	/* No new transmission happens until the Transfer End bit gets cleared */
+	if (dmac.CHCR0 & CHCR_TE)
+		return 0;
+
 	if (!(dmac.DMAOR & DMAOR_DME))
 		return panic("Attempted to enable a DMA channel with the master disabled\n");
 	if (dmac.DMAOR & DMAOR_NMIF)
 		return panic("DMA blocked by NMI\n");
-	if (dmac.CHCR0 & CHCR_TE)
-		return panic("Attempted to enable DMA without resetting the TE bit\n");
 
 	if ((dmac.CHCR0 & CHCR_TS) != (1 << CHCR_TS_SHIFT))
 		return panic("Unsupported DMAC transmit size (0x%.8x)\n", dmac.CHCR0);
@@ -3453,6 +3459,9 @@ static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 		if ((dmac.CHCR0 & CHCR_TE) && (dmac.CHCR0 & CHCR_IE)) {
 			set_dma_interrupt();
 			no_exception = false;
+		} else {
+			clear_dma_interrupt();
+			exception_check_prepare();
 		}
 		return 0;
 	case DMAC_CHCR2_OFF:
@@ -3768,6 +3777,11 @@ struct intc {
 static void set_dma_interrupt(void)
 {
 	intc.IRR1 |= IRR1_DEI0R;
+}
+
+static void clear_dma_interrupt(void)
+{
+	intc.IRR1 &= ~IRR1_DEI0R;
 }
 
 static bool is_intc_byte_address(uint32_t addr)
