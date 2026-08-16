@@ -6842,6 +6842,7 @@ static int execute(uint32_t pc);
 #define INSN_NM_SUB					0x3008
 #define INSN_NM_SUBC				0x300A
 #define INSN_NM_ADD					0x300C
+#define INSN_NM_DMULS				0x300D
 #define INSN_NM_ADDC				0x300E
 #define INSN_NM_ADDV				0x300F
 #define INSN_N_SHLL					0x4000
@@ -7814,6 +7815,13 @@ static int execute_nm_format(uint32_t pc, uint16_t insn)
 		return 0;
 	case INSN_NM_ADD:
 		write_gp_register(n, read_gp_register(n) + read_gp_register(m));
+		cpu.PC += 2;
+		return 0;
+	case INSN_NM_DMULS:
+		tmp64_s = (int32_t)read_gp_register(n);
+		tmp64_s *= (int32_t)read_gp_register(m);
+		cpu.MACL = tmp64_s;
+		cpu.MACH = tmp64_s >> 32;
 		cpu.PC += 2;
 		return 0;
 	case INSN_NM_ADDC:
@@ -8805,6 +8813,9 @@ static void disassemble_nm_format(uint32_t pc, uint16_t insn)
 		return;
 	case INSN_NM_ADD:
 		printf("ADD R%u,R%u\n", m, n);
+		return;
+	case INSN_NM_DMULS:
+		printf("DMULS.L R%u,R%u\n", m, n);
 		return;
 	case INSN_NM_ADDC:
 		printf("ADDC R%u,R%u\n", m, n);
