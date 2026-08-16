@@ -23,6 +23,7 @@ static void dump_all_monitors(void);
 #define MONITOR_SERIAL_ENABLED	(1U << 2)
 #define MONITOR_XB3A_ENABLED	(1U << 3)
 #define MONITOR_PEN_ENABLED		(1U << 4)
+#define MONITOR_AUDIO_ENABLED	(1U << 5)
 /* The eeprom i2c monitor is not very interesting so it's off by default */
 static uint8_t enabled_monitors = MONITOR_SERIAL_ENABLED | MONITOR_XB3A_ENABLED;
 
@@ -147,6 +148,7 @@ long card_size;
 #define MBOARD_COMMANDS_OFF		0x12000004
 #define MBOARD_STATUS_OFF		0x12000008	/* Status flags */
 #define MBOARD_BLINKCNT_OFF		0x1200001C
+#define MBOARD_SOUND_SAMPLE_OFF	0x1200007C
 
 /* Flags for the motherboard's status register */
 #define MBOARD_CARD_SLOT_EMPTY	(1U << 0)
@@ -179,6 +181,7 @@ static bool is_motherboard_word_address(uint32_t addr)
 	case MBOARD_COMMANDS_OFF:
 	case MBOARD_STATUS_OFF:
 	case MBOARD_BLINKCNT_OFF:
+	case MBOARD_SOUND_SAMPLE_OFF:
 	case 0x12000000:
 	case 0x12000014:
 	case 0x12000024:
@@ -771,6 +774,7 @@ enum monitor {
 	MONITOR_SERIAL,
 	MONITOR_XB3A,
 	MONITOR_EEPROM,
+	MONITOR_AUDIO,
 };
 
 /* For monitoring xB3A and serial only for now. TODO: infrared. */
@@ -785,6 +789,8 @@ struct console_monitor {
 
 static struct console_monitor serial_monitor = { .cm_tag = "SERIAL" };
 static struct console_monitor xB3A_monitor = { .cm_tag = "XB3A" };
+/* Not really a console... TODO: use a generic monitor buffer or something */
+static struct console_monitor audio_monitor = { .cm_tag = "AUDIO" };
 
 /*
  * We don't want multiple monitors to buffer at the same time: that would make
@@ -799,6 +805,8 @@ static void dump_monitors_except(enum monitor which)
 		console_monitor_dump(&xB3A_monitor);
 	if (which != MONITOR_EEPROM)
 		eeprom_monitor_dump_all();
+	if (which != MONITOR_AUDIO)
+		console_monitor_dump(&audio_monitor);
 }
 
 static void dump_all_monitors(void)
@@ -1811,6 +1819,8 @@ static int motherboard_read_word_reg(uint32_t addr, uint16_t *val_p)
 	}
 }
 
+static void console_monitor_save_raw_word(struct console_monitor *mon, uint16_t word);
+
 static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
@@ -1838,6 +1848,11 @@ static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 		return 0;
 	case MBOARD_BLINKCNT_OFF:
 		motherboard.blinkcnt = val;
+		return 0;
+	case MBOARD_SOUND_SAMPLE_OFF:
+		/* Monitor usually disabled, so check early and save some cycles */
+		if (enabled_monitors & MONITOR_AUDIO_ENABLED)
+			console_monitor_save_raw_word(&audio_monitor, val);
 		return 0;
 	case 0x1200006c:
 	case 0x12000034:
@@ -3025,10 +3040,14 @@ static void console_monitor_save_bytes(struct console_monitor *mon, const char *
 		if (!(enabled_monitors & MONITOR_XB3A_ENABLED))
 			return;
 		dump_monitors_except(MONITOR_XB3A);
-	} else {
+	} else if (mon == &serial_monitor) {
 		if (!(enabled_monitors & MONITOR_SERIAL_ENABLED))
 			return;
 		dump_monitors_except(MONITOR_SERIAL);
+	} else {
+		if (!(enabled_monitors & MONITOR_AUDIO_ENABLED))
+			return;
+		dump_monitors_except(MONITOR_AUDIO);
 	}
 
 	outlen = mon->cm_len;
@@ -3073,6 +3092,14 @@ static void console_monitor_save_byte(struct console_monitor *mon, uint8_t byte)
 	}
 
 	snprintf(buf, sizeof(buf), "\\x%.2x", byte);
+	return console_monitor_save_bytes(mon, buf, sizeof(buf) - 1);
+}
+
+static void console_monitor_save_raw_word(struct console_monitor *mon, uint16_t word)
+{
+	char buf[6];
+
+	snprintf(buf, sizeof(buf), "%.4x ", word);
 	return console_monitor_save_bytes(mon, buf, sizeof(buf) - 1);
 }
 
@@ -11205,6 +11232,8 @@ static int monitor_command_handler(int argc, const char **argv)
 		write_flag_to_byte(&enabled_monitors, MONITOR_XB3A_ENABLED, on);
 	} else if (strcmp(argv[1], "pen") == 0) {
 		write_flag_to_byte(&enabled_monitors, MONITOR_PEN_ENABLED, on);
+	} else if (strcmp(argv[1], "audio") == 0) {
+		write_flag_to_byte(&enabled_monitors, MONITOR_AUDIO_ENABLED, on);
 	} else {
 		printf("No monitor called \"%s\"\n", argv[1]);
 		return CLI_CONTINUE;
