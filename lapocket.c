@@ -1821,6 +1821,20 @@ static int motherboard_read_word_reg(uint32_t addr, uint16_t *val_p)
 
 static void console_monitor_save_raw_word(struct console_monitor *mon, uint16_t word);
 
+#ifdef HAVE_SDL
+static SDL_AudioStream *audio_stream = NULL;
+static void audio_stream_word(uint16_t val)
+{
+	if (!SDL_PutAudioStreamData(audio_stream, &val, sizeof(val)))
+		notice("SDL missed an audio sample (%s)\n", SDL_GetError());
+}
+#else
+static void audio_stream_word(uint16_t val)
+{
+	(void)val;
+}
+#endif
+
 static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
@@ -1853,6 +1867,7 @@ static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 		/* Monitor usually disabled, so check early and save some cycles */
 		if (enabled_monitors & MONITOR_AUDIO_ENABLED)
 			console_monitor_save_raw_word(&audio_monitor, val);
+		audio_stream_word(val);
 		return 0;
 	case 0x1200006c:
 	case 0x12000034:
@@ -4811,6 +4826,8 @@ static SDL_Texture *texture = NULL;
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
+	struct SDL_AudioSpec audio_spec;
+
 	if (parse_options(argc, argv))
 		return SDL_APP_FAILURE;
 	set_signal_handlers();
@@ -4821,7 +4838,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	/* TODO: pass an actual version string */
 	if (!SDL_SetAppMetadata("La Pocket", "prerelease", NULL))
 		return SDL_APP_FAILURE;
-	if (!SDL_Init(SDL_INIT_VIDEO)) {
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
 		fprintf(stderr, "%s: failed to initialize SDL (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
@@ -4855,6 +4872,23 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	}
 	if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST)) {
 		fprintf(stderr, "%s: failed to set the scale mode (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+
+	audio_spec.format = SDL_AUDIO_S16LE;
+	audio_spec.channels = 1;
+	/*
+	 * Mentioned by the self-test function <0x80039860>. Another frequency that
+	 * shows up there is 11025 Hz.
+	 */
+	audio_spec.freq = 44100;
+	audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec, NULL, NULL);
+	if (!audio_stream) {
+		fprintf(stderr, "%s: failed to open the audio stream (%s)\n", progname, SDL_GetError());
+		return SDL_APP_FAILURE;
+	}
+	if (!SDL_ResumeAudioStreamDevice(audio_stream)) {
+		fprintf(stderr, "%s: failed to resume the audio stream (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 
