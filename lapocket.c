@@ -3208,11 +3208,14 @@ struct dmac {
 #define CHCR_AM		(1U << 17)	/* Acknowledge Mode Bit */
 #define CHCR_AL		(1U << 16)	/* Acknowledge Level */
 #define CHCR_DM		(3U << 14)	/* Destination Address Mode Bits */
+#define CHCR_DM_SHIFT		14
 #define CHCR_SM		(3U << 12)	/* Source Address Mode Bits */
+#define CHCR_SM_SHIFT		12
 #define CHCR_RS		(15U << 8)	/* Resource Select Bits */
 #define CHCR_DS		(1U << 6)	/* DREQ Select Bit */
 #define CHCR_TM		(1U << 5)	/* Transmit Mode */
 #define CHCR_TS		(3U << 3)	/* Transmit Size Bits */
+#define CHCR_TS_SHIFT		3
 #define CHCR_IE		(1U << 2)	/* Interrupt Enable Bit */
 #define CHCR_TE		(1U << 1)	/* Transfer End Bit */
 #define CHCR_DE		(1U << 0)	/* DMAC Enable Bit */
@@ -3309,6 +3312,70 @@ static int dmac_read_longword_reg(uint32_t addr, uint32_t *val_p)
 	}
 }
 
+static int read_word(uint32_t addr, uint16_t *val_p);
+static int write_word(uint32_t addr, uint16_t val);
+static void set_dma_interrupt(void);
+
+/*
+ * Note that in reality dmac only happens when requested by the external (sound
+ * in our case) device through the DREQ0 pin, not all at once like this (TODO?).
+ */
+static int dma_execute(void)
+{
+	int src_mode, dest_mode;
+	uint32_t src_step, dest_step;
+	uint16_t data16;
+
+	if (!(dmac.DMAOR & DMAOR_DME))
+		return panic("Attempted to enable a DMA channel with the master disabled\n");
+	if (dmac.DMAOR & DMAOR_NMIF)
+		return panic("DMA blocked by NMI\n");
+	if (dmac.CHCR0 & CHCR_TE)
+		return panic("Attempted to enable DMA without resetting the TE bit\n");
+
+	if ((dmac.CHCR0 & CHCR_TS) != (1 << CHCR_TS_SHIFT))
+		return panic("Unsupported DMAC transmit size (0x%.8x)\n", dmac.CHCR0);
+	if ((dmac.SAR0 & 1) || (dmac.DAR0 & 1))
+		return panic("Unaligned word access through DMA\n");
+
+	src_mode = (dmac.CHCR0 & CHCR_SM) >> CHCR_SM_SHIFT;
+	if (src_mode == 0)
+		src_step = 0;
+	else if (src_mode == 1)
+		src_step = +2;
+	else if (src_mode == 2)
+		src_step = -2;
+	else
+		return panic("Reserved DMAC source address mode\n");
+
+	dest_mode = (dmac.CHCR0 & CHCR_DM) >> CHCR_DM_SHIFT;
+	if (dest_mode == 0)
+		dest_step = 0;
+	else if (dest_mode == 1)
+		dest_step = +2;
+	else if (dest_mode == 2)
+		dest_step = -2;
+	else
+		return panic("Illegal DMAC destination address mode\n");
+
+	/* Setting DMATCR0 to 0 produces the maximum transfer count of 1 << 24 */
+	do {
+		/* Ban recursion here, for the sake of my sanity */
+		if (is_dmac_word_address(dmac.SAR0) || is_dmac_word_address(dmac.DAR0))
+			return panic("DMA access to DMA registers\n");
+
+		if (read_word(dmac.SAR0, &data16))
+			return panic("Read error during DMA operation\n");
+		if (write_word(dmac.DAR0, data16))
+			return panic("Write error during DMA operation\n");
+		dmac.SAR0 += src_step;
+		dmac.DAR0 += dest_step;
+	} while (--dmac.DMATCR0);
+
+	dmac.CHCR0 |= CHCR_TE;
+	return 0;
+}
+
 static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 {
 	switch (addr) {
@@ -3333,11 +3400,33 @@ static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 			return panic("Attempted setting of DI bit for DMA channel 0 (0x%.8x)\n", val);
 		if (val & CHCR_RO)
 			return panic("Attempted setting of RO bit for DMA channel 0 (0x%.8x)\n", val);
+		if (val & CHCR_RL)
+			return panic("Unsupported DMAC DRAK level (0x%.8x)\n", val);
+		if (val & CHCR_AM)
+			return panic("Unsupported DMAC DACK mode (0x%.8x)\n", val);
+		if (val & CHCR_AL)
+			return panic("Unsupported DMAC DACK level (0x%.8x)\n", val);
 		if (val & CHCR_RS)
 			return panic("Unsupported DMAC resource select bits (0x%.8x)\n", val);
-		if (val & CHCR_TE)
+		if (val & CHCR_DS)
+			return panic("Unsupported DMAC sampling mode for DREQ (0x%.8x)\n", val);
+		if (val & CHCR_TM)
+			return panic("Unsupported DMAC bus mode (0x%.8x)\n", val);
+		if ((val & CHCR_TE) && !(dmac.CHCR0 & CHCR_TE))
 			return panic("Attempt to set a DMAC transfer end bit\n");
 		dmac.CHCR0 = val;
+		/*
+		 * We do this immediately to avoid the performance hit from checking
+		 * for dmac operations inside the run() loop.
+		 */
+		if (dmac.CHCR0 & CHCR_DE) {
+			if (dma_execute())
+				return 1;
+		}
+		if ((dmac.CHCR0 & CHCR_TE) && (dmac.CHCR0 & CHCR_IE)) {
+			set_dma_interrupt();
+			no_exception = false;
+		}
 		return 0;
 	case DMAC_CHCR2_OFF:
 		if (val)
@@ -3617,6 +3706,16 @@ uint8_t stbcr_2_reg;
 /* These bits can be reset to zero on a write, but not set to 1 */
 #define IRR0_UNSETTABLE_MASK	(IRR0_IRQ5R | IRR0_IRQ4R | IRR0_IRQ3R | IRR0_IRQ2R | IRR0_IRQ1R | IRR0_IRQ0R)
 
+/* Flags of the IRR1 register */
+#define IRR1_TXI1R		(1U << 7)	/* TXI1 Interrupt Request */
+#define IRR1_BRI1R		(1U << 6)	/* BRI1 Interrupt Request */
+#define IRR1_RXI1R		(1U << 5)	/* RXI1 Interrupt Request */
+#define IRR1_ERI1R		(1U << 4)	/* ERI1 Interrupt Request */
+#define IRR1_DEI3R		(1U << 3)	/* DEI3 Interrupt Request */
+#define IRR1_DEI2R		(1U << 2)	/* DEI2 Interrupt Request */
+#define IRR1_DEI1R		(1U << 1)	/* DEI1 Interrupt Request */
+#define IRR1_DEI0R		(1U << 0)	/* DEI0 Interrupt Request */
+
 /* Flags of the ICR0 register */
 #define ICR0_NMIL		(1U << 15)	/* NMI Input Level */
 #define ICR0_NMIE		(1U << 8)	/* NMI Edge Select */
@@ -3638,6 +3737,11 @@ struct intc {
 	/* The NMI pin must be high on boot, or else we get stuck */
 	.ICR0 = ICR0_NMIL,
 };
+
+static void set_dma_interrupt(void)
+{
+	intc.IRR1 |= IRR1_DEI0R;
+}
 
 static bool is_intc_byte_address(uint32_t addr)
 {
@@ -9410,6 +9514,19 @@ static void tuni_accept(int i, int priority)
 	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
+/* Accept a DEIi interrupt */
+static void dei_accept(int i, int priority)
+{
+	cpu.SPC = cpu.PC - 4;
+	cpu.SSR = cpu.SR;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
+	cpu.PC = cpu.VBR + 0x600 + 4;
+	cpu.INTEVT = priority_to_intevt(priority);
+	cpu.INTEVT2 = 0x800 + i * 0x20;
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
+}
+
 /* Returns the priority level for IRQi */
 static int irq_priority(int i)
 {
@@ -9456,6 +9573,12 @@ static bool timer_underflow_interrupted(void)
 	return false;
 }
 
+/* Returns the priority level for DMA interrupt DEIi */
+static int dei_priority(int i)
+{
+	return (intc.IPRE >> 12) & 0x000F;
+}
+
 /* Accept the highest priority interrupt unless it's too low for the SR mask */
 static void interrupt_accept(void)
 {
@@ -9500,6 +9623,17 @@ static void interrupt_accept(void)
 		}
 	}
 
+	if (intc.IRR1) {
+		if (intc.IRR1 & IRR1_DEI0R) {
+			curr_priority = dei_priority(0);
+			if (curr_priority > max_priority) {
+				max_priority = curr_priority;
+				max_num = 0;
+				accept_fn = dei_accept;
+			}
+		}
+	}
+
 	for (i = 0; i < 3; ++i) {
 		if ((tmu.TCR[i] & TCR_UNIE) && (tmu.TCR[i] & TCR_UNF)) {
 			curr_priority = tuni_priority(i);
@@ -9518,7 +9652,7 @@ static void interrupt_accept(void)
 
 static void exception_check_prepare(void)
 {
-	no_exception = !(cpu.extra_state & EXTRA_EXCEPTION) && !intc.IRR0 && !timer_underflow_interrupted();
+	no_exception = !(cpu.extra_state & EXTRA_EXCEPTION) && !intc.IRR0 && !timer_underflow_interrupted() && !intc.IRR1;
 }
 
 static void interrupt_check(void)
