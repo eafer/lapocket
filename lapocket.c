@@ -935,6 +935,7 @@ static int i2c_pull_up_scl(void)
 		i2c.sda = i2c.buffer & 0x80;
 		break;
 	default:
+		break;
 	}
 	i2c.scl = 1;
 	return 0;
