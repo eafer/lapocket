@@ -47,6 +47,20 @@ static long long last_refresh_nanosecs = 0;
 static bool no_exception = true;
 static void exception_check_prepare(void);
 
+struct audio {
+	int a_freq;				/* Samples per second */
+	int a_period;			/* Length of a sample in nanoseconds */
+	long long a_pretime;	/* Nanoseconds when dma started */
+	int a_count;			/* Samples played in current dma transfer */
+} audio = {
+	/*
+	 * The actual frequency will get set later through a motherboard register,
+	 * but I need to pick some default value just in case...
+	 */
+	.a_freq = 44100,
+	.a_period = 22675,
+};
+
 #ifdef HAVE_SDL
 bool headless = false;
 #else
@@ -2000,14 +2014,17 @@ static int audio_stream_update_freq(uint16_t val)
 	if (headless)
 		return 0;
 
-	audio_spec.format = SDL_AUDIO_S16LE;
-	audio_spec.channels = 1;
 	/*
 	 * The multiplier was retrieved from the self-test function at <0x80039860>,
 	 * maybe it's the frequency of some clock? I don't know what the "x2" is
 	 * about, that was just trial and error.
 	 */
-	audio_spec.freq = 2 * (22118400 / val);
+	audio.a_freq = 2 * (22118400 / val);
+	audio.a_period = (1000 * 1000 * 1000) / audio.a_freq;
+
+	audio_spec.format = SDL_AUDIO_S16LE;
+	audio_spec.channels = 1;
+	audio_spec.freq = audio.a_freq;
 	if (!SDL_SetAudioStreamFormat(audio_stream, &audio_spec, NULL))
 		return panic("Failed to update the SDL stream format (%s)\n", SDL_GetError());
 	return 0;
@@ -3580,10 +3597,6 @@ static int dma_execute(void)
 	uint32_t src_step, dest_step;
 	uint16_t data16;
 
-	/* No new transmission happens until the Transfer End bit gets cleared */
-	if (dmac.CHCR0 & CHCR_TE)
-		return 0;
-
 	if (!(dmac.DMAOR & DMAOR_DME))
 		return panic("Attempted to enable a DMA channel with the master disabled\n");
 	if (dmac.DMAOR & DMAOR_NMIF)
@@ -3615,6 +3628,8 @@ static int dma_execute(void)
 		return panic("Illegal DMAC destination address mode\n");
 
 	/* Setting DMATCR0 to 0 produces the maximum transfer count of 1 << 24 */
+	audio.a_pretime = nanosecs;
+	audio.a_count = dmac.DMATCR0 ? dmac.DMATCR0 : 1 << 24;
 	do {
 		/* Ban recursion here, for the sake of my sanity */
 		if (is_dmac_word_address(dmac.SAR0) || is_dmac_word_address(dmac.DAR0))
@@ -3628,12 +3643,18 @@ static int dma_execute(void)
 		dmac.DAR0 += dest_step;
 	} while (--dmac.DMATCR0);
 
-	dmac.CHCR0 |= CHCR_TE;
 	return 0;
+}
+
+static bool chcr_is_dma_running(uint32_t chcr)
+{
+	return (chcr & CHCR_DE) && !(chcr & CHCR_TE);
 }
 
 static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 {
+	uint32_t old_val;
+
 	switch (addr) {
 	case DMAC_SAR0_OFF:
 		dmac.SAR0 = val;
@@ -3650,6 +3671,7 @@ static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 		notice("DMA transfer count register 0 set to 0x%.8x\n", val);
 		return 0;
 	case DMAC_CHCR0_OFF:
+		old_val = dmac.CHCR0;
 		if (val & ~CHCR_BIT_MASK)
 			return panic("Attempted write to reserved bits of CHCR0 (0x%.8x)\n", val);
 		if (val & CHCR_DI)
@@ -3671,11 +3693,15 @@ static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 		if ((val & CHCR_TE) && !(dmac.CHCR0 & CHCR_TE))
 			return panic("Attempt to set a DMAC transfer end bit\n");
 		dmac.CHCR0 = val;
-		/*
-		 * We do this immediately to avoid the performance hit from checking
-		 * for dmac operations inside the run() loop.
-		 */
-		if (dmac.CHCR0 & CHCR_DE) {
+		if (!chcr_is_dma_running(old_val) && chcr_is_dma_running(val)) {
+			/*
+			 * I'd rather run dma one transfer at a time inside update_clocks(),
+			 * but that makes the sound weird for some reason (TODO). Instead I
+			 * do the whole thing at once, but I don't clear clear the TE bit
+			 * or set the interrupt until enough time has passed, or else we
+			 * would get stuck in an endless audio playback loop that would
+			 * freeze the device.
+			 */
 			if (dma_execute())
 				return 1;
 		}
@@ -5255,11 +5281,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 
 	audio_spec.format = SDL_AUDIO_S16LE;
 	audio_spec.channels = 1;
-	/*
-	 * The actual frequency will get set later through a motherboard register,
-	 * but I need to pick some value here...
-	 */
-	audio_spec.freq = 44100;
+	audio_spec.freq = audio.a_freq;
 	audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec, NULL, NULL);
 	if (!audio_stream) {
 		fprintf(stderr, "%s: failed to open the audio stream (%s)\n", progname, SDL_GetError());
@@ -9905,6 +9927,20 @@ static void update_clocks(void)
 	 */
 	update_scif();
 	update_top_light();
+
+	/*
+	 * Once enough time has passed for all the audio samples to play, trigger
+	 * the dma interrupt, pretending that the copy just completed now.
+	 */
+	if (chcr_is_dma_running(dmac.CHCR0)) {
+		if (nanosecs - audio.a_pretime >= audio.a_period * audio.a_count) {
+			dmac.CHCR0 |= CHCR_TE;
+			if (dmac.CHCR0 & CHCR_IE) {
+				set_dma_interrupt();
+				no_exception = false;
+			}
+		}
+	}
 }
 
 static uint8_t irda_receive_triggers(void)
@@ -11743,6 +11779,7 @@ struct struct_layout {
 	{&nanosecs, sizeof(nanosecs)},
 	{&last_refresh_nanosecs, sizeof(last_refresh_nanosecs)},
 	{&no_exception, sizeof(no_exception)},
+	{&audio, sizeof(audio)},
 	{&motherboard, sizeof(motherboard)},
 	{&battery, sizeof(battery)},
 	{&touchscreen, sizeof(touchscreen)},
