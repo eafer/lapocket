@@ -149,6 +149,7 @@ long card_size;
 #define MBOARD_STATUS_OFF		0x12000008	/* Status flags */
 #define MBOARD_BLINKCNT_OFF		0x1200001C
 #define MBOARD_SOUND_SAMPLE_OFF	0x1200007C
+#define MBOARD_SOUND_FREQ_OFF	0x12000084
 
 /* Flags for the motherboard's status register */
 #define MBOARD_CARD_SLOT_EMPTY	(1U << 0)
@@ -1823,17 +1824,46 @@ static int motherboard_read_word_reg(uint32_t addr, uint16_t *val_p)
 static void console_monitor_save_raw_word(struct console_monitor *mon, uint16_t word);
 
 #ifdef HAVE_SDL
+
 static SDL_AudioStream *audio_stream = NULL;
+
 static void audio_stream_word(uint16_t val)
 {
 	if (!SDL_PutAudioStreamData(audio_stream, &val, sizeof(val)))
 		notice("SDL missed an audio sample (%s)\n", SDL_GetError());
 }
+
+/* TODO: interaction with save/load commands */
+static int audio_stream_update_freq(uint16_t val)
+{
+	struct SDL_AudioSpec audio_spec;
+
+	audio_spec.format = SDL_AUDIO_S16LE;
+	audio_spec.channels = 1;
+	/*
+	 * The multiplier was retrieved from the self-test function at <0x80039860>,
+	 * maybe it's the frequency of some clock? I don't know what the "x2" is
+	 * about, that was just trial and error.
+	 */
+	audio_spec.freq = 2 * (22118400 / val);
+	if (!SDL_SetAudioStreamFormat(audio_stream, &audio_spec, NULL))
+		return panic("Failed to update the SDL stream format (%s)\n", SDL_GetError());
+	return 0;
+}
+
 #else
+
 static void audio_stream_word(uint16_t val)
 {
 	(void)val;
 }
+
+static int audio_stream_update_freq(uint16_t val)
+{
+	(void)val;
+	return 0;
+}
+
 #endif
 
 static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
@@ -1870,6 +1900,8 @@ static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 			console_monitor_save_raw_word(&audio_monitor, val);
 		audio_stream_word(val);
 		return 0;
+	case MBOARD_SOUND_FREQ_OFF:
+		return audio_stream_update_freq(val);
 	case 0x1200006c:
 	case 0x12000034:
 	case 0x12000024:
@@ -1877,7 +1909,6 @@ static int motherboard_write_word_reg(uint32_t addr, uint16_t val)
 	case 0x12000014:
 	case 0x12000044:
 	case 0x12000080:
-	case 0x12000084:
 	case 0x12000098:
 		/* No idea about these but keep going for now (TODO) */
 	case 0x12000000:
@@ -4879,8 +4910,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 	audio_spec.format = SDL_AUDIO_S16LE;
 	audio_spec.channels = 1;
 	/*
-	 * Mentioned by the self-test function <0x80039860>. Another frequency that
-	 * shows up there is 11025 Hz.
+	 * The actual frequency will get set later through a motherboard register,
+	 * but I need to pick some value here...
 	 */
 	audio_spec.freq = 44100;
 	audio_stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec, NULL, NULL);
