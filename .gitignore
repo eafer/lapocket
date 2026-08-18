@@ -4,7 +4,7 @@ lapocket
 tags
 failure.out
 /tests/bin
-*.out
+/*.out
 *.gcov
 *.gcda
 *.gcno
