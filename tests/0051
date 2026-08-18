@@ -1,0 +1,11 @@
+# Tests that the selftests load correctly
+
+monitor xb3a off
+
+# To boot into the selftests we must hold both RECORD and DOWN during boot
+input record
+input down
+wait 1000
+
+print CRC
+exit

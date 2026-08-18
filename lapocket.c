@@ -197,6 +197,8 @@ static bool is_motherboard_word_address(uint32_t addr)
 	case 0x12000044:
 	case 0x12000068:
 	case 0x1200006c:
+	case 0x12000074:
+	case 0x12000078:
 	case 0x12000080:
 	case 0x12000084:
 	case 0x12000098:
@@ -1817,6 +1819,8 @@ static int motherboard_read_word_reg(uint32_t addr, uint16_t *val_p)
 	case 0x12000014:
 	case 0x12000044:
 	case 0x12000068:
+	case 0x12000074:
+	case 0x12000078:
 	case 0x12000098:
 		/* No idea about these but keep going for now (TODO) */
 		notice("Reading from unknown motherboard register 0x%.8x (PC: 0x%.8x)\n", addr, cpu.PC);
@@ -2897,10 +2901,20 @@ static int ioports_read_byte_reg(uint32_t addr, uint8_t *val_p)
 	switch (addr) {
 	case IOPORTS_PCDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PCCR_OFF - PFC_REGS_OFF));
-		/* TODO: this looks backwards? We should be reading from the pins */
-		if (control != 0xAAAA)
+		if ((control & PFC_PC6MD1) == 0)
+			write_flag_to_byte(&val, 1U << 6, ioports.PCDR & (1U << 6));
+		if ((control & PFC_PC4MD1) == 0)
+			write_flag_to_byte(&val, 1U << 4, ioports.PCDR & (1U << 4));
+		/* PINT1 is for USB interrupts; we don't implement USB */
+		if (control & PFC_PC1MD1)
+			write_flag_to_byte(&val, 1U << 1, false);
+		else
 			return panic("Unsupported configuration for Port C (0x%.4x)\n", control);
-		*val_p = ioports.PCDR;
+		/*
+		 * The rest of the bits return the pin states, but they are either not
+		 * in use or unknown to us at this point.
+		 */
+		*val_p = val;
 		return 0;
 	case IOPORTS_PDDR_OFF:
 		control = *(uint16_t *)(pfc_regs + (PFC_PDCR_OFF - PFC_REGS_OFF));
