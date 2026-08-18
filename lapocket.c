@@ -44,6 +44,12 @@ static long long debugger_nanosecs = 0;
 static bool no_exception = true;
 static void exception_check_prepare(void);
 
+#ifdef HAVE_SDL
+bool headless = false;
+#else
+bool headless = true;
+#endif
+
 #ifdef __unix__
 #include <signal.h>
 
@@ -1829,6 +1835,9 @@ static SDL_AudioStream *audio_stream = NULL;
 
 static void audio_stream_word(uint16_t val)
 {
+	if (headless)
+		return;
+
 	if (!SDL_PutAudioStreamData(audio_stream, &val, sizeof(val)))
 		notice("SDL missed an audio sample (%s)\n", SDL_GetError());
 }
@@ -1837,6 +1846,9 @@ static void audio_stream_word(uint16_t val)
 static int audio_stream_update_freq(uint16_t val)
 {
 	struct SDL_AudioSpec audio_spec;
+
+	if (headless)
+		return 0;
 
 	audio_spec.format = SDL_AUDIO_S16LE;
 	audio_spec.channels = 1;
@@ -4645,12 +4657,6 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 char *progname = NULL;
 bool interactive = false;
 FILE *script_file = NULL;
-
-#ifdef HAVE_SDL
-bool headless = false;
-#else
-bool headless = true;
-#endif
 
 #define MAX_BREAKPOINTS	128
 
