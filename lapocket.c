@@ -4952,6 +4952,9 @@ static void prompt_loop(void);
 
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
+	void *pixels = NULL;
+	int pitch;
+
 	prompt_loop();
 	display_update_output();
 
@@ -4959,10 +4962,15 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 		fprintf(stderr, "%s: failed to clear the render (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	if (!SDL_UpdateTexture(texture, NULL, display.output, DISPLAY_FB_WIDTH << 2)) {
-		fprintf(stderr, "%s: failed to update the texture (%s)\n", progname, SDL_GetError());
+
+	pitch = DISPLAY_FB_WIDTH << 2;
+	if (!SDL_LockTexture(texture, NULL, &pixels, &pitch)) {
+		fprintf(stderr, "%s: failed to lock the texture (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
+	memcpy(pixels, display.output, sizeof(display.output));
+	SDL_UnlockTexture(texture);
+
 	if (!SDL_RenderTexture(renderer, texture, NULL, NULL)) {
 		fprintf(stderr, "%s: failed to render the texture (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
