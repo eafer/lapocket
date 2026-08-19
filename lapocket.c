@@ -9984,6 +9984,16 @@ static void exception_check(void)
 	exception_check_prepare();
 }
 
+static void sleep_nanosecs(long long count)
+{
+#ifdef HAVE_SDL
+	if (!headless)
+		return SDL_DelayNS(200000);
+#endif
+	/* Just pretend the time actually passed */
+	nanosecs += count;
+}
+
 /* The step count is in the remaining_steps global (-1 means forever) */
 static int run(void)
 {
@@ -10053,17 +10063,17 @@ static int run(void)
 			break;
 		}
 
-		/*
-		 * Return regularly to refresh the screen and check for input. Also
-		 * offer to yield execution for real during sleep.
-		 */
-		if (cpu.extra_state & EXTRA_POWER_DOWN || nanosecs - last_refresh >= 16 * 1000 * 1000) {
+		/* Return regularly to refresh the screen and check for input */
+		if (nanosecs - last_refresh >= 16 * 1000 * 1000) {
 			/* 60 hz, seems reasonable */
 			refresh_time = true;
 			last_refresh = nanosecs;
 			ret = 0;
 			break;
 		}
+		/* Yield execution for real during sleep */
+		if (cpu.extra_state & EXTRA_POWER_DOWN)
+			sleep_nanosecs(200000);
 	}
 
 	running = false;
