@@ -4,7 +4,7 @@ TARGET = lapocket
 
 ifdef EMCC
   CC = $(EMCC)
-  TARGET = index.html
+  TARGET = index.js
   SDL3_CFLAGS = -DHAVE_SDL
   SDL3_LIBS = -sUSE_SDL=3
   EMCC_FLAGS = --embed-file firmware.bin --pre-js pre.js
@@ -30,4 +30,4 @@ $(TARGET): lapocket.c
 	$(CC) $(CFLAGS) -o $(TARGET) lapocket.c $(SDL3_LIBS)
 
 clean:
-	rm -rf *.o index.html index.js index.wasm lapocket
+	rm -rf *.o index.js index.wasm lapocket
