@@ -5632,6 +5632,7 @@ static int write_rtc_reg(uint32_t addr, uint8_t val)
 		rtc.RMONAR = val & 0x9FU;
 		return 0;
 	case RTC_RCR1_OFF:
+		/* TODO: implement each bit of RCR1 and RCR2 (or at least panic) */
 		if (val & RCR1_UNSETTABLE_MASK) {
 			uint8_t preserved_bits = val & RCR1_UNSETTABLE_MASK;
 			val = (val & ~preserved_bits) | (rtc.RCR1 & preserved_bits);
@@ -5639,10 +5640,6 @@ static int write_rtc_reg(uint32_t addr, uint8_t val)
 		rtc.RCR1 = val & RCR1_BIT_MASK;
 		return 0;
 	case RTC_RCR2_OFF:
-		/*
-		 * TODO: I haven't encountered writes to this register yet so, once I
-		 * do, I should review all the bits carefully.
-		 */
 		if (val & (RCR2_ADJ | RCR2_PEF | RCR2_PES))
 			return panic("Unsupported RTC configuration");
 		if (val & RCR2_RESET)
@@ -9284,6 +9281,156 @@ static int tmu_prescaler(int i)
 	return result;
 }
 
+static uint8_t binary_to_bcd(uint8_t bin)
+{
+	return (bin % 10) + ((bin / 10) << 4);
+}
+
+static uint8_t bcd_to_binary(uint8_t bcd)
+{
+	return (bcd & 0x0F) + ((bcd & 0xF0) >> 4) * 10;
+}
+
+static bool is_leap_year(void)
+{
+	uint8_t year;
+
+	year = bcd_to_binary(rtc.RYRCNT);
+	/*
+	 * The manual is clear that this is the only check performed. I guess it
+	 * makes sense for a device released around 2000...
+	 */
+	return year % 4 == 0;
+}
+
+static uint8_t days_in_month(void)
+{
+	uint8_t month;
+
+	month = bcd_to_binary(rtc.RMONCNT);
+	switch (month) {
+	case 1:
+	case 3:
+	case 5:
+	case 7:
+	case 8:
+	case 10:
+	case 12:
+		return 31;
+	case 4:
+	case 6:
+	case 9:
+	case 11:
+		return 30;
+	default:
+		return is_leap_year() ? 29 : 28;
+	}
+}
+
+static void increment_rtc_years(void)
+{
+	uint8_t bin;
+
+	bin = bcd_to_binary(rtc.RYRCNT);
+	if (++bin == 100) {
+		/* The manual says nothing about overflow, but the range is 00-99 */
+		rtc.RYRCNT = 0;
+		return;
+	}
+	rtc.RYRCNT = binary_to_bcd(bin);
+}
+
+static void increment_rtc_months(void)
+{
+	uint8_t bin;
+
+	bin = bcd_to_binary(rtc.RMONCNT);
+	/*
+	 * The manual claims that the range is 0-12. Lousy Smarch weather... But
+	 * the actual range is 1-12 or else things break. It's odd because most
+	 * other counters start from 0.
+	 */
+	if (++bin == 13) {
+		rtc.RMONCNT = 1;
+		return increment_rtc_years();
+	}
+	rtc.RMONCNT = binary_to_bcd(bin);
+}
+
+static void increment_rtc_weekday(void)
+{
+	uint8_t bin;
+
+	bin = bcd_to_binary(rtc.RWKCNT);
+	if (++bin == 7) {
+		rtc.RWKCNT = 0;
+		return;
+	}
+	rtc.RWKCNT = binary_to_bcd(bin);
+}
+
+static void increment_rtc_days(void)
+{
+	uint8_t bin;
+
+	increment_rtc_weekday();
+
+	bin = bcd_to_binary(rtc.RDAYCNT);
+	/* Strangely, only days and months seem to count from 1 */
+	if (++bin == days_in_month() + 1) {
+		rtc.RDAYCNT = 1;
+		return increment_rtc_months();
+	}
+	rtc.RDAYCNT = binary_to_bcd(bin);
+}
+
+static void increment_rtc_hours(void)
+{
+	uint8_t bin;
+
+	bin = bcd_to_binary(rtc.RHRCNT);
+	if (++bin == 24) {
+		rtc.RHRCNT = 0;
+		return increment_rtc_days();
+	}
+	rtc.RHRCNT = binary_to_bcd(bin);
+}
+
+static void increment_rtc_minutes(void)
+{
+	uint8_t bin;
+
+	bin = bcd_to_binary(rtc.RMINCNT);
+	if (++bin == 60) {
+		rtc.RMINCNT = 0;
+		return increment_rtc_hours();
+	}
+	rtc.RMINCNT = binary_to_bcd(bin);
+}
+
+static void increment_rtc_seconds(void)
+{
+	uint8_t bin;
+
+	bin = bcd_to_binary(rtc.RSECCNT);
+	if (++bin == 60) {
+		rtc.RSECCNT = 0;
+		/* TODO: panic on interrupt */
+		rtc.RCR1 |= RCR1_CF;
+		return increment_rtc_minutes();
+	}
+	rtc.RSECCNT = binary_to_bcd(bin);
+}
+
+static void increment_rtc_r64cnt(void)
+{
+	if (++rtc.R64CNT == 64) {
+		rtc.R64CNT = 0;
+		rtc.RCR1 |= RCR1_CF;
+		return increment_rtc_seconds();
+	}
+}
+
 static void set_nanosecs_sdl(void)
 {
 #ifdef HAVE_SDL
@@ -9404,11 +9551,7 @@ static void update_clocks(void)
 	cycle = 15625000;
 	while (nanosecs - rtc.pretime >= cycle) {
 		rtc.pretime += cycle;
-		/* TODO: update the seconds on overflow, and so on... */
-		if (++rtc.R64CNT == 64) {
-			rtc.R64CNT = 0;
-			rtc.RCR1 |= RCR1_CF;
-		}
+		increment_rtc_r64cnt();
 	}
 
 	/*
