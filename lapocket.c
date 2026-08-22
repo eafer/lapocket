@@ -1153,7 +1153,12 @@ static int display_write_byte_reg(uint32_t addr, uint8_t val)
 	case DISPLAY_MODE_OFF:
 		notice("Display \"mode\" set to 0x%.2x\n", val);
 		display.mode = val;
-		display_dirty = true;
+		/*
+		 * Note that in SDL mode the display won't update until something gets
+		 * written to the framebuffer. I have no idea if that's the right thing
+		 * to do, but otherwise the hummingbird gets corrupted briefly before
+		 * the magenta screen. TODO: match this behaviour in headless mode.
+		 */
 		return 0;
 	case DISPLAY_PAL_IDX_OFF:
 		display.pal_idx = val;
