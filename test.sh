@@ -39,8 +39,8 @@ cd ./tests
 mkdir bin
 for filename in *.out; do
 	echo -n "${filename%.out}... "
-	# TODO: fully support the card in all tests
-	if [ "$filename" = "0027.out" ]; then
+	# Tests that mention "CompactFlash" are the ones that use the card
+	if grep -q CompactFlash ${filename%.out}; then
 		"$exefile" --headless -f ${filename%.out} -C $cardfile $firmware > $dumpfile 2>$errfile || fail
 	else
 		"$exefile" --headless -f ${filename%.out} $firmware > $dumpfile 2>$errfile || fail
