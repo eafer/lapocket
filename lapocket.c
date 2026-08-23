@@ -4485,24 +4485,22 @@ static int mmu_read_longword_reg(uint32_t addr, uint32_t *val_p)
 }
 
 /* Offset of each of the virtual memory areas P0 to P4 */
-static uint32_t mmu_area_offs[] = {
-	0x00000000,
-	0x80000000,
-	0xA0000000,
-	0xC0000000,
-	0xE0000000
-};
+#define VA_AREA_P0	0x00000000
+#define VA_AREA_P1	0x80000000
+#define VA_AREA_P2	0xA0000000
+#define VA_AREA_P3	0xC0000000
+#define VA_AREA_P4	0xE0000000
 
-static int mmu_virt_to_area(uint32_t va)
+static bool vm_area_not_mapped(uint32_t va)
 {
-	int i;
-
-	for (i = 4; i >= 0; --i) {
-		if (va >= mmu_area_offs[i])
-			return i;
+	switch (va & 0xE0000000) {
+	case VA_AREA_P1:
+	case VA_AREA_P2:
+	case VA_AREA_P4:
+		return true;
+	default:
+		return false;
 	}
-	(void)panic("BUG: va not covered by any area\n");
-	return 0;
 }
 
 static uint32_t mmu_tlb_to_va(uint32_t tlb_addr, int index)
@@ -4608,7 +4606,7 @@ static int mmu_dump_tlb(int argc, const char **argv)
 /* TODO: handle overlaps between mmu and debugger mappings */
 static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 {
-	int area, entry, way, protection;
+	int entry, way, protection;
 	uint32_t tlb_addr, tlb_data, vpage_addr, cpu_flag;
 
 	/* No translation if the mmu is disabled */
@@ -4618,8 +4616,7 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 	}
 
 	/* Only vm areas P0 and P3 get translated */
-	area = mmu_virt_to_area(va);
-	if (area != 0 && area != 3) {
+	if (vm_area_not_mapped(va)) {
 		*pa = va;
 		return 0;
 	}
