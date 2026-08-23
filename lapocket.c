@@ -1423,6 +1423,14 @@ static bool is_cfcard_ata_byte_address(uint32_t addr)
 	case CF_IOMODE_CDH_OFF:
 	case CF_IOMODE_STATCOMM_OFF:
 	case CF_IOMODE_DEVCON_OFF:
+	case 0x1B201970:
+	case 0x1B201972:
+	case 0x1B201973:
+	case 0x1B201974:
+	case 0x1B201975:
+	case 0x1B201976:
+	case 0x1B201977:
+	case 0x1B201B76:
 		return true;
 	default:
 		return false;
@@ -1434,6 +1442,7 @@ static bool is_cfcard_ata_word_address(uint32_t addr)
 	switch (addr) {
 	case CF_MEMMODE_DATA_OFF:
 	case CF_IOMODE_DATA_OFF:
+	case 0x1B201970:
 		return true;
 	default:
 		return false;
@@ -1443,6 +1452,10 @@ static bool is_cfcard_ata_word_address(uint32_t addr)
 static int cfcard_ata_check_address_mode(uint32_t addr)
 {
 	bool memmode, memmode_addr;
+
+	/* TODO: include these addresses in the checks */
+	if ((addr & 0xFF000000) == 0x1B000000)
+		return 0;
 
 	memmode = (cfcard.conf_opt & CF_CONFOPT_CONF_BITS) == CF_CONFOPT_CONF_MMAP;
 	memmode_addr = (addr & 0xFF000000) == 0x18000000;
@@ -1461,6 +1474,7 @@ static int cfcard_ata_read_byte_reg(uint32_t addr, uint8_t *val_p)
 	switch (addr) {
 	case CF_MEMMODE_DATA_OFF:
 	case CF_IOMODE_DATA_OFF:
+	case 0x1B201970:
 		/* Apparently the sector buffer can also be read one byte at a time */
 		if (!(cfcard.status & CF_STATUS_DRQ))
 			return panic("Reading from CompactFlash buffer with no data request\n");
@@ -1473,6 +1487,14 @@ static int cfcard_ata_read_byte_reg(uint32_t addr, uint8_t *val_p)
 		return 0;
 	case CF_MEMMODE_STATCOMM_OFF:
 	case CF_IOMODE_STATCOMM_OFF:
+	case 0x1B201977:
+	case 0x1B201B76:
+		/*
+		 * 0x1B201B76 is the auxiliary status register. It returns the same
+		 * value as reading from the other addresses, but it doesn't clear a
+		 * pending interrupt like the others allegedly do. Nothing related to
+		 * CompactFlash interupts is implemented at this point (TODO?).
+		 */
 		*val_p = cfcard.status;
 		return 0;
 	default:
@@ -1490,6 +1512,7 @@ static int cfcard_ata_read_word_reg(uint32_t addr, uint16_t *val_p)
 	switch (addr) {
 	case CF_MEMMODE_DATA_OFF:
 	case CF_IOMODE_DATA_OFF:
+	case 0x1B201970:
 		if (!(cfcard.status & CF_STATUS_DRQ))
 			return panic("Reading from CompactFlash buffer with no data request\n");
 		if (cfcard.secbuf_off >= CF_SECTOR_SZ - 1)
@@ -1543,6 +1566,7 @@ static int cfcard_ata_write_word_reg(uint32_t addr, uint16_t val)
 	switch (addr) {
 	case CF_MEMMODE_DATA_OFF:
 	case CF_IOMODE_DATA_OFF:
+	case 0x1B201970:
 		if (!(cfcard.status & CF_STATUS_DRQ))
 			return panic("Writing to CompactFlash buffer with no data request\n");
 		if (cfcard.secbuf_off >= CF_SECTOR_SZ - 1)
@@ -1680,11 +1704,18 @@ static int cfcard_identify_drive(void)
 	 * is not MFM encoded."
 	 */
 	idinfo->gencon = 0x848A;
+	idinfo->unformsec = 0x0240;
 	/*
 	 * From the manual: "dual ported multi-sector buffer capable of simultaneous
 	 * data transfers to or from the host and the CompactFlash Memory Card".
 	 */
 	idinfo->buftype = 0x0002;
+	idinfo->bufsize = 0x0002;
+	idinfo->eccsize = 0x0004;
+	idinfo->mulseccnt = 0x0001;
+	/* "DMA NOT Supported (bit 8), LBA supported (bit 9)" */
+	idinfo->caps = 0x0200;
+	idinfo->piomode = 0x0200;
 	/*
 	 * "Bit 0 of this field is set, indicating that words 54 to 58 are valid and
 	 * reflect the current number of cylinders, heads and sectors. Bit 1 is also
@@ -1692,12 +1723,35 @@ static int cfcard_identify_drive(void)
 	 */
 	idinfo->tranvalid = 0x0003;
 	/*
+	 * The "1" just means that this field is valid. The least significant byte
+	 * might need a different value...
+	 */
+	idinfo->mulsec = 0x0100;
+	idinfo->advpio = 0x0003;
+	idinfo->piotm_nof = 0x0078;
+	idinfo->piotm_f = 0x0078;
+
+	/*
 	 * The sector count needs to be reported correctly right away because the
 	 * self-tests will pick a sector at random to work with.
 	 */
 	sector_count = card_size >> CF_SECTOR_SZ_SHIFT;
 	idinfo->secnum_ls = sector_count & 0x0000FFFF;
 	idinfo->secnum_ms = sector_count >> 16;
+
+	/* Just fill these three with something for now... */
+	memset(idinfo->serial, 's', sizeof(idinfo->serial));
+	memset(idinfo->firmrev, 'f', sizeof(idinfo->firmrev));
+	memset(idinfo->model, 'm', sizeof(idinfo->model));
+
+	/* Experimenting... */
+	idinfo->dcylnum = sector_count / (0x003F * 0x0010);
+	idinfo->dheadnum = 0x0010;
+	idinfo->unformtr = idinfo->unformsec * 0x003F;
+	idinfo->dsptr = 0x003F;
+	idinfo->cylnum = idinfo->dcylnum;
+	idinfo->headnum = idinfo->dheadnum;
+	idinfo->sptr = 0x003F;
 
 	cfcard.status |= CF_STATUS_DRQ;
 	return 0;
@@ -1728,31 +1782,37 @@ static int cfcard_ata_write_byte_reg(uint32_t addr, uint8_t val)
 	switch (addr) {
 	case CF_MEMMODE_DEVCON_OFF:
 	case CF_IOMODE_DEVCON_OFF:
+	case 0x1B201B76:
 		if (val & CF_DEVCON_SWRST)
 			return panic("Soft reset for CompactFlash not supported\n");
 		if (!(val & CF_DEVCON_IEN))
-			return panic("Interrupts for CompactFlash not supported\n");
+			notice("Interrupts for CompactFlash not supported\n");
 		/* The remaining bits are documented as "ignored" or "do not care" */
 		cfcard.dev_con = val;
 		return 0;
 	case CF_MEMMODE_SECCNT_OFF:
 	case CF_IOMODE_SECCNT_OFF:
+	case 0x1B201972:
 		cfcard.sec_cnt = val;
 		return 0;
 	case CF_MEMMODE_SECNUM_OFF:
 	case CF_IOMODE_SECNUM_OFF:
+	case 0x1B201973:
 		cfcard.sec_num = val;
 		return 0;
 	case CF_MEMMODE_CYLLOW_OFF:
 	case CF_IOMODE_CYLLOW_OFF:
+	case 0x1B201974:
 		cfcard.cyl_low = val;
 		return 0;
 	case CF_MEMMODE_CYLHIGH_OFF:
 	case CF_IOMODE_CYLHIGH_OFF:
+	case 0x1B201975:
 		cfcard.cyl_high = val;
 		return 0;
 	case CF_MEMMODE_CDH_OFF:
 	case CF_IOMODE_CDH_OFF:
+	case 0x1B201976:
 		val |= CF_CDH_ALWAYS_ONE;
 		if (val & CF_CDH_DRV)
 			return panic("CompactFlash drive 1 not supported\n");
@@ -1762,6 +1822,7 @@ static int cfcard_ata_write_byte_reg(uint32_t addr, uint8_t val)
 		return 0;
 	case CF_MEMMODE_STATCOMM_OFF:
 	case CF_IOMODE_STATCOMM_OFF:
+	case 0x1B201977:
 		return cfcard_execute_command(val);
 	default:
 		return panic("Attempted write of 0x%.2x to unsupported CompactFlash register at 0x%.8x\n", val, addr);
@@ -1775,9 +1836,27 @@ static bool is_cfcard_config_byte_address(uint32_t addr)
 	case CF_CONFIG_STATUS_OFF:
 	case CF_PIN_REPLACEMENT_OFF:
 	case CF_SOCKET_COPY_OFF:
+	case 0x19201A00:
+	case 0x19201A02:
 		return true;
 	default:
 		return false;
+	}
+}
+
+static int cfcard_config_read_byte_reg(uint32_t addr, uint8_t *val_p)
+{
+	switch (addr) {
+	case CF_CONFIG_OPTION_OFF:
+	case 0x19201A00:
+		*val_p = cfcard.conf_opt;
+		return 0;
+	case CF_CONFIG_STATUS_OFF:
+	case 0x19201A02:
+		*val_p = cfcard.conf_stat;
+		return 0;
+	default:
+		return panic("Attempted read of unsupported CompactFlash register at 0x%.8x\n", addr);
 	}
 }
 
@@ -1787,14 +1866,24 @@ static int cfcard_config_write_byte_reg(uint32_t addr, uint8_t val)
 
 	switch (addr) {
 	case CF_CONFIG_OPTION_OFF:
+	case 0x19201A00:
 		if (val & CF_CONFOPT_SRESET)
 			return panic("Soft reset for CompactFlash not supported\n");
-		if (val & CF_CONFOPT_LEVLREQ)
-			return panic("Level mode interrupts for CompactFlash not supported\n");
+		if ((val ^ cfcard.conf_opt) & CF_CONFOPT_LEVLREQ) {
+			/* TODO: implement the interrupts? */
+			if (val & CF_CONFOPT_LEVLREQ)
+				notice("CompactFlash set to level mode interrupts\n");
+			else
+				notice("CompactFlash set to pulse mode interrupts\n");
+		}
 		conf = val & CF_CONFOPT_CONF_BITS;
 		if (conf != CF_CONFOPT_CONF_MMAP && conf != CF_CONFOPT_CONF_IOMAP_SECN)
 			return panic("Unsupported CompactFlash configuration index %.2x\n", conf);
 		cfcard.conf_opt = val;
+		return 0;
+	case CF_CONFIG_STATUS_OFF:
+	case 0x19201A02:
+		cfcard.conf_stat = val;
 		return 0;
 	default:
 		return panic("Attempted write of 0x%.2x to unsupported CompactFlash register at 0x%.8x\n", val, addr);
@@ -5940,11 +6029,14 @@ static int read_byte(uint32_t addr, uint8_t *val_p)
 	case 0x18000000:
 	case 0x19000000:
 	case 0x1A000000:
+	case 0x1B000000:
 		if (is_compactflash_cis_byte_address(addr))
 			return compactflash_cis_read_byte_reg(addr, val_p);
 		if (is_cfcard_ata_byte_address(addr))
 			return cfcard_ata_read_byte_reg(addr, val_p);
-		break;
+		if (is_cfcard_config_byte_address(addr))
+			return cfcard_config_read_byte_reg(addr, val_p);
+		return panic("Attempted read of unsupported CompactFlash register at 0x%.8x\n", addr);
 	case 0xFF000000:
 	case 0x04000000:
 		if (addr >= PFC_REGS_OFF && addr < PFC_REGS_OFF + PFC_REGS_SIZE)
@@ -6018,7 +6110,9 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 			return panic("Unsupported motherboard register 0x%.8x\n", addr);
 		return motherboard_read_word_reg(addr, val_p);
 	case 0x18000000:
+	case 0x19000000:
 	case 0x1A000000:
+	case 0x1B000000:
 		if (is_cfcard_ata_word_address(addr))
 			return cfcard_ata_read_word_reg(addr, val_p);
 		break;
@@ -6207,12 +6301,14 @@ static int write_byte(uint32_t addr, uint8_t val)
 	case 0x13000000:
 		return xB3A_write_byte_reg(addr, val);
 	case 0x18000000:
+	case 0x19000000:
 	case 0x1A000000:
+	case 0x1B000000:
 		if (is_cfcard_ata_byte_address(addr))
 			return cfcard_ata_write_byte_reg(addr, val);
 		if (is_cfcard_config_byte_address(addr))
 			return cfcard_config_write_byte_reg(addr, val);
-		break;
+		return panic("Attempted write of 0x%.2x to unsupported CompactFlash register at 0x%.8x\n", val, addr);
 	case 0xFF000000:
 	case 0x04000000:
 		if (is_ioports_byte_address(addr))
@@ -6298,6 +6394,7 @@ static int write_word(uint32_t addr, uint16_t val)
 		return xB3A_write_word_reg(addr, val);
 	case 0x18000000:
 	case 0x1A000000:
+	case 0x1B000000:
 		if (is_cfcard_ata_word_address(addr))
 			return cfcard_ata_write_word_reg(addr, val);
 		break;
