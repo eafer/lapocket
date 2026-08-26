@@ -1464,6 +1464,8 @@ static int cfcard_ata_check_address_mode(uint32_t addr)
 	return 0;
 }
 
+static int cfcard_read_sector(void);
+
 static int cfcard_ata_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	uint8_t val;
@@ -1481,8 +1483,11 @@ static int cfcard_ata_read_byte_reg(uint32_t addr, uint8_t *val_p)
 		if (cfcard.secbuf_off == CF_SECTOR_SZ)
 			return panic("Attempted read from empty CompactFlash sector buffer\n");
 		val = cfcard.secbuf[cfcard.secbuf_off++];
-		if (cfcard.secbuf_off == CF_SECTOR_SZ)
-			cfcard.status &= ~CF_STATUS_DRQ; /* Not certain here (TODO) */
+		if (cfcard.secbuf_off == CF_SECTOR_SZ) {
+			cfcard.status &= ~CF_STATUS_DRQ;
+			if (cfcard.sec_cnt != 0)
+				cfcard_read_sector();
+		}
 		*val_p = val;
 		return 0;
 	case CF_MEMMODE_STATCOMM_OFF:
@@ -1519,8 +1524,11 @@ static int cfcard_ata_read_word_reg(uint32_t addr, uint16_t *val_p)
 			return panic("Attempted read from empty CompactFlash sector buffer\n");
 		val = cfcard.secbuf[cfcard.secbuf_off++];
 		val |= cfcard.secbuf[cfcard.secbuf_off++] << 8;
-		if (cfcard.secbuf_off == CF_SECTOR_SZ)
-			cfcard.status &= ~CF_STATUS_DRQ; /* Not certain here (TODO) */
+		if (cfcard.secbuf_off == CF_SECTOR_SZ) {
+			cfcard.status &= ~CF_STATUS_DRQ;
+			if (cfcard.sec_cnt != 0)
+				cfcard_read_sector();
+		}
 		*val_p = val;
 		return 0;
 	default:
@@ -1596,8 +1604,6 @@ static int cfcard_read_sector(void)
 
 	if (!(cfcard.cdh & CF_CDH_CHS_OR_LBA))
 		return panic("CompactFlash Cylinder/Head/Sector mode not supported\n");
-	if (cfcard.sec_cnt != 1)
-		return panic("Unsupported read of multiple CompactFlash sectors at once\n");
 
 	secnum = cfcard.sec_num;			/* LBA 7-0 */
 	secnum += cfcard.cyl_low << 8;		/* LBA 15-8 */
@@ -1620,6 +1626,20 @@ static int cfcard_read_sector(void)
 	}
 	cfcard.secbuf_off = 0;
 	cfcard.status |= CF_STATUS_DRQ;
+
+	/*
+	 * "A sector count of 0 requests 256 sectors".
+	 *
+	 * "At command completion, the Command Block Registers contain the
+	 * cylinder, head and sector number of the last sector read."
+	 */
+	if (--cfcard.sec_cnt != 0) {
+		++secnum;
+		cfcard.sec_num = secnum;
+		cfcard.cyl_low = secnum >> 8;
+		cfcard.cyl_high = secnum >> 16;
+		cfcard.cdh = (cfcard.cdh & 0xF0) | ((secnum >> 24) & 0x0F);
+	}
 	return 0;
 }
 
