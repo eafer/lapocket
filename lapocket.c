@@ -1602,7 +1602,7 @@ static int cfcard_read_sector(void)
 	secnum = cfcard.sec_num;			/* LBA 7-0 */
 	secnum += cfcard.cyl_low << 8;		/* LBA 15-8 */
 	secnum += cfcard.cyl_high << 16;	/* LBA 23-16 */
-	secnum += (cfcard.cdh & 0x0F) << 8;	/* LBA 27-24 */
+	secnum += (cfcard.cdh & 0x0F) << 24;/* LBA 27-24 */
 
 	if (!card_file)
 		return panic("BUG: ATA read command accepted without a card\n");
