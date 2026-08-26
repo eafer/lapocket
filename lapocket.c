@@ -1563,8 +1563,22 @@ static int cfcard_write_end(void)
 	 */
 	if (fflush(card_file))
 		return panic("Failed fflush() for card file\n");
+
+	/*
+	 * Same as the read command. TODO: is the sector count register actually
+	 * updated or did I make that up?
+	 */
+	if (--cfcard.sec_cnt != 0) {
+		++secnum;
+		cfcard.sec_num = secnum;
+		cfcard.cyl_low = secnum >> 8;
+		cfcard.cyl_high = secnum >> 16;
+		cfcard.cdh = (cfcard.cdh & 0xF0) | ((secnum >> 24) & 0x0F);
+	}
 	return 0;
 }
+
+static int cfcard_write_begin(void);
 
 static int cfcard_ata_write_word_reg(uint32_t addr, uint16_t val)
 {
@@ -1585,6 +1599,8 @@ static int cfcard_ata_write_word_reg(uint32_t addr, uint16_t val)
 			if (cfcard_write_end())
 				return 1;
 			cfcard.status &= ~CF_STATUS_DRQ;
+			if (cfcard.sec_cnt != 0)
+				cfcard_write_begin();
 		}
 		return 0;
 	default:
@@ -1647,8 +1663,6 @@ static int cfcard_write_begin(void)
 {
 	if (!(cfcard.cdh & CF_CDH_CHS_OR_LBA))
 		return panic("CompactFlash Cylinder/Head/Sector mode not supported\n");
-	if (cfcard.sec_cnt != 1)
-		return panic("Unsupported read of multiple CompactFlash sectors at once\n");
 
 	cfcard.secbuf_off = 0;
 	cfcard.status |= CF_STATUS_DRQ;
