@@ -41,6 +41,8 @@ static long long wait_end = 0;
 static long long nanosecs = 0;
 /* Keep track of the time spent inside the debugger */
 static long long debugger_nanosecs = 0;
+/* Last time the display got refreshed */
+static long long last_refresh_nanosecs = 0;
 
 static bool no_exception = true;
 static void exception_check_prepare(void);
@@ -10571,7 +10573,6 @@ static void sleep_nanosecs(long long count)
 /* The step count is in the remaining_steps global (-1 means forever) */
 static int run(void)
 {
-	static long long last_refresh = 0;
 	bool forever = remaining_steps < 0;
 	bool delayed_slot;
 	uint32_t pc, old_pc;
@@ -10638,10 +10639,10 @@ static int run(void)
 		}
 
 		/* Return regularly to refresh the screen and check for input */
-		if (nanosecs - last_refresh >= 16 * 1000 * 1000) {
+		if (nanosecs - last_refresh_nanosecs >= 16 * 1000 * 1000) {
 			/* 60 hz, seems reasonable */
 			refresh_time = true;
-			last_refresh = nanosecs;
+			last_refresh_nanosecs = nanosecs;
 			ret = 0;
 			break;
 		}
@@ -11673,6 +11674,7 @@ struct struct_layout {
 } dump_layout[] = {
 	{memory, sizeof(memory)},
 	{&nanosecs, sizeof(nanosecs)},
+	{&last_refresh_nanosecs, sizeof(last_refresh_nanosecs)},
 	{&no_exception, sizeof(no_exception)},
 	{&motherboard, sizeof(motherboard)},
 	{&battery, sizeof(battery)},
