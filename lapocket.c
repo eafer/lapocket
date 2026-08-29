@@ -24,8 +24,9 @@ static void dump_all_monitors(void);
 #define MONITOR_XB3A_ENABLED	(1U << 3)
 #define MONITOR_PEN_ENABLED		(1U << 4)
 #define MONITOR_AUDIO_ENABLED	(1U << 5)
+#define MONITOR_IRDA_ENABLED	(1U << 6)
 /* The eeprom i2c monitor is not very interesting so it's off by default */
-static uint8_t enabled_monitors = MONITOR_SERIAL_ENABLED | MONITOR_XB3A_ENABLED;
+static uint8_t enabled_monitors = MONITOR_SERIAL_ENABLED | MONITOR_IRDA_ENABLED | MONITOR_XB3A_ENABLED;
 
 static void dump_cpu(void);
 static void print_backtrace(void);
@@ -149,6 +150,8 @@ long card_size;
 
 /* If provided, this file will be the serial interface */
 static int serial_fd = -1;
+/* And this will be the infrared interface */
+static int irda_fd = -1;
 
 #endif
 
@@ -790,6 +793,7 @@ static int usb_read_byte_reg(uint32_t addr, uint8_t *val_p)
 enum monitor {
 	MONITOR_NONE,
 	MONITOR_SERIAL,
+	MONITOR_IRDA,
 	MONITOR_XB3A,
 	MONITOR_EEPROM,
 	MONITOR_AUDIO,
@@ -806,6 +810,7 @@ struct console_monitor {
 };
 
 static struct console_monitor serial_monitor = { .cm_tag = "SERIAL" };
+static struct console_monitor irda_monitor = { .cm_tag = "IRDA" };
 static struct console_monitor xB3A_monitor = { .cm_tag = "XB3A" };
 /* Not really a console... TODO: use a generic monitor buffer or something */
 static struct console_monitor audio_monitor = { .cm_tag = "AUDIO" };
@@ -819,6 +824,8 @@ static void dump_monitors_except(enum monitor which)
 {
 	if (which != MONITOR_SERIAL)
 		console_monitor_dump(&serial_monitor);
+	if (which != MONITOR_IRDA)
+		console_monitor_dump(&irda_monitor);
 	if (which != MONITOR_XB3A)
 		console_monitor_dump(&xB3A_monitor);
 	if (which != MONITOR_EEPROM)
@@ -3254,6 +3261,10 @@ static void console_monitor_save_bytes(struct console_monitor *mon, const char *
 		if (!(enabled_monitors & MONITOR_SERIAL_ENABLED))
 			return;
 		dump_monitors_except(MONITOR_SERIAL);
+	} else if (mon == &irda_monitor) {
+		if (!(enabled_monitors & MONITOR_IRDA_ENABLED))
+			return;
+		dump_monitors_except(MONITOR_IRDA);
 	} else {
 		if (!(enabled_monitors & MONITOR_AUDIO_ENABLED))
 			return;
@@ -3686,7 +3697,7 @@ static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 /*
  * The registers infrared data-association interface are accessed at address
  * range 0xA4000140-0xA4000150, which is actually in the P2 area so the top 3
- * bits are ignored. TODO: actually implement infrared?
+ * bits are ignored. TODO: merge this with scif as much as possible?
  */
 #define IRDA_SCSMR1_OFF		0x04000140
 #define IRDA_SCBRR1_OFF		0x04000142
@@ -3696,6 +3707,58 @@ static int dmac_write_longword_reg(uint32_t addr, uint32_t val)
 #define IRDA_SCFRDR1_OFF	0x0400014A
 #define IRDA_SCFCR1_OFF		0x0400014C
 #define IRDA_SCFDR1_OFF		0x0400014E
+
+#define IRDA_RX_QUEUE_SIZE	255
+
+struct irda {
+	uint8_t SCSMR1;			/* Serial mode register 1 */
+	uint8_t SCBRR1;			/* Bit rate register 1 */
+	uint8_t SCSCR1;			/* Serial control register 1 */
+	uint8_t SCFTDR1[16];	/* Transmit FIFO data register 1 */
+	uint16_t SCSSR1;		/* Serial status register 1 */
+	uint8_t SCFRDR1[16];	/* Receive data FIFO register 1 */
+	uint8_t SCFCR1;			/* FIFO control register 1 */
+
+	/* These fields don't correspond to actual registers */
+	uint8_t SCFTDR1_count;	/* Number of entries in SCFTDR1 FIFO */
+	uint8_t SCFRDR1_count;	/* Number of entries in SCFRDR1 FIFO */
+	uint8_t SCSSR1_unread;	/* Set SCSSR1 flags that haven't been read yet */
+
+	uint8_t	rx_queue_start, rx_queue_end, rx_queue_cnt;
+	uint8_t	rx_queue[IRDA_RX_QUEUE_SIZE];
+} irda = {0};
+
+/* Flags of the SCSCR1 register */
+#define SCSCR1_TIE	(1U << 7)	/* Transmit interrupt enable */
+#define SCSCR1_RIE	(1U << 6)	/* Receive interrupt enable */
+#define SCSCR1_TE	(1U << 5)	/* Transmit enable */
+#define SCSCR1_RE	(1U << 4)	/* Receive enable */
+#define SCSCR1_CKE1	(1U << 1)	/* Clock enable 1 */
+#define SCSCR1_CKE0	(1U << 0)	/* Clock enable 0 */
+#define SCSCR1_BIT_MASK	(SCSCR1_TIE | SCSCR1_RIE | SCSCR1_TE | SCSCR1_RE | SCSCR1_CKE1 | SCSCR1_CKE0)
+
+/*
+ * Flags of the SCSSR1 register. The upper 8 bits are the number of receive
+ * errors, so always zero in the emulator.
+ */
+#define SCSSR1_ER	(1U << 7)	/* Receive error */
+#define SCSSR1_TEND	(1U << 6)	/* Transmit end */
+#define SCSSR1_TDFE	(1U << 5)	/* Transmit FIFO data empty */
+#define SCSSR1_BRK	(1U << 4)	/* Break detection */
+#define SCSSR1_FER	(1U << 3)	/* Framing error */
+#define SCSSR1_PER	(1U << 2)	/* Parity error */
+#define SCSSR1_RDF	(1U << 1)	/* Receive FIFO data full */
+#define SCSSR1_DR	(1U << 0)	/* Receive data ready */
+
+/* Flags of the SCFCR1 register */
+#define SCFCR1_RTRG1	(1U << 7)	/* Trigger of the Number of Receive FIFO Data 1 */
+#define SCFCR1_RTRG0	(1U << 6)	/* Trigger of the Number of Receive FIFO Data 0 */
+#define SCFCR1_TTRG1	(1U << 5)	/* Trigger of the Number of Transmit FIFO Data 1 */
+#define SCFCR1_TTRG0	(1U << 4)	/* Trigger of the Number of Transmit FIFO Data 0 */
+#define SCFCR1_MCE		(1U << 3)	/* Modem Control Enable */
+#define SCFCR1_TFRST	(1U << 2)	/* Transmit FIFO Data Register Reset */
+#define SCFCR1_RFRST	(1U << 1)	/* Receive FIFO Data Register Reset */
+#define SCFCR1_LOOP		(1U << 0)	/* Loop Back Test */
 
 static bool is_irda_byte_address(uint32_t addr)
 {
@@ -3726,6 +3789,13 @@ static bool is_irda_word_address(uint32_t addr)
 static int read_irda_word_reg(uint32_t addr, uint16_t *val_p)
 {
 	switch (addr) {
+	case IRDA_SCSSR1_OFF:
+		irda.SCSSR1_unread = 0;
+		*val_p = irda.SCSSR1;
+		return 0;
+	case IRDA_SCFDR1_OFF:
+		*val_p = (irda.SCFTDR1_count << 8) & irda.SCFRDR1_count;
+		return 0;
 	default:
 		return panic("Attempted read of unsupported IrDA register at 0x%.8x\n", addr);
 	}
@@ -3734,9 +3804,29 @@ static int read_irda_word_reg(uint32_t addr, uint16_t *val_p)
 static int read_irda_byte_reg(uint32_t addr, uint8_t *val_p)
 {
 	switch (addr) {
-	case IRDA_SCSCR1_OFF:
-		*val_p = 0;
+	case IRDA_SCSMR1_OFF:
+		*val_p = irda.SCSMR1;
 		return 0;
+	case IRDA_SCBRR1_OFF:
+		*val_p = irda.SCBRR1;
+		return 0;
+	case IRDA_SCSCR1_OFF:
+		*val_p = irda.SCSCR1;
+		return 0;
+	case IRDA_SCFRDR1_OFF:
+		if (irda.SCFRDR1_count == 0) {
+			*val_p = 0; /* "Undefined", so whatever */
+			return 0;
+		}
+		if (irda.SCFRDR1_count == 1)
+			irda.SCSSR1 &= ~SCSSR1_RDF;
+		/* TODO: data ready bit? */
+		*val_p = irda.SCFRDR1[--irda.SCFRDR1_count];
+		return 0;
+	case IRDA_SCFCR1_OFF:
+		*val_p = irda.SCFCR1;
+		return 0;
+	case IRDA_SCFTDR1_OFF:
 	default:
 		return panic("Attempted read of unsupported IrDA register at 0x%.8x\n", addr);
 	}
@@ -3745,17 +3835,59 @@ static int read_irda_byte_reg(uint32_t addr, uint8_t *val_p)
 static int write_irda_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
+	case IRDA_SCSSR1_OFF:
+		val &= irda.SCSSR1; /* No flags can be set to 1 by a write */
+		irda.SCSSR1 = (irda.SCSSR1 & irda.SCSSR1_unread) | val;
+		return 0;
+	case IRDA_SCFDR1_OFF:
+		return 0;
 	default:
 		return panic("Attempted write to unsupported IrDA register at 0x%.8x\n", addr);
 	}
 }
 
+static void irda_send_single_char(void);
+
 static int write_irda_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
+	case IRDA_SCSMR1_OFF:
+		/* TODO: character length could matter? Is this register even used? */
+		if (!(val & (1U << 7)))
+			return panic("IrDA interface not set to IrDA\n");
+		irda.SCSMR1 = val;
+		return 0;
+	case IRDA_SCBRR1_OFF:
+		irda.SCBRR1 = val;
+		return 0;
 	case IRDA_SCSCR1_OFF:
-		if (val & 0xF0)
-			return panic("Infrared is not supported\n");
+		irda.SCSCR1 = val & SCSCR1_BIT_MASK;
+		return 0;
+	case IRDA_SCFTDR1_OFF:
+		/* TODO: generic fifo structure? Ring buffer implementation? */
+		if (irda.SCFTDR1_count == 16)
+			return 0;
+		memmove(&irda.SCFTDR1[1], &irda.SCFTDR1[0], irda.SCFTDR1_count++);
+		irda.SCFTDR1[0] = val;
+		irda.SCSSR1 &= ~(SCSSR1_TEND | SCSSR1_TDFE);
+		/*
+		 * I'd rather do this inside update_irda(), but that function isn't
+		 * called on every run() loop and so the output of some tests would
+		 * break in awkward places.
+		 */
+		irda_send_single_char();
+		/* TODO: serial interrupts? Are they even used by the jornada? */
+		return 0;
+	case IRDA_SCFRDR1_OFF:
+		/* TODO: exception or something? Not documented */
+		return 0;
+	case IRDA_SCFCR1_OFF:
+		if (val & ~(SCFCR1_RFRST | SCFCR1_TFRST | SCFCR1_RTRG1 | SCFCR1_RTRG0 | SCFCR1_TTRG1 | SCFCR1_TTRG0))
+			return panic("Unsupported control command for IrDA FIFO (0x%.4x)\n", val);
+		if (val & SCFCR1_RFRST)
+			irda.SCFRDR1_count = 0;
+		if (val & SCFCR1_TFRST)
+			irda.SCFTDR1_count = 0;
 		return 0;
 	default:
 		return panic("Attempted write to unsupported IrDA register at 0x%.8x\n", addr);
@@ -4913,6 +5045,7 @@ static int parse_options(int argc, char *argv[])
 	char *script_name = NULL;
 	char *card_name = NULL;
 	char *serial_name = NULL;
+	char *irda_name = NULL;
 	size_t ret;
 	int i;
 
@@ -4937,6 +5070,10 @@ static int parse_options(int argc, char *argv[])
 			if (++i == argc)
 				usage();
 			serial_name = argv[i];
+		} else if (strcmp(argv[i], "-I") == 0) {
+			if (++i == argc)
+				usage();
+			irda_name = argv[i];
 		} else if (strcmp(argv[i], "--headless") == 0) {
 			headless = true;
 		} else if (i == argc - 1) {
@@ -5003,6 +5140,18 @@ static int parse_options(int argc, char *argv[])
 		}
 #else
 		fprintf(stderr, "%s: serial port not supported in your system\n", progname);
+#endif
+	}
+
+	if (irda_name) {
+#ifdef __unix__
+		irda_fd = open(irda_name, O_RDWR | O_NOCTTY | O_NONBLOCK);
+		if (irda_fd == -1) {
+			perror(progname);
+			return 1;
+		}
+#else
+		fprintf(stderr, "%s: infrared not supported in your system\n", progname);
 #endif
 	}
 
@@ -6858,6 +7007,18 @@ static void dump_micro(void)
 	dump_scif();
 }
 
+static void init_irda(void)
+{
+	irda.SCSMR1 = 0x00;
+	irda.SCBRR1 = 0xFF;
+	irda.SCSCR1 = 0x00;
+	irda.SCFTDR1_count = 0;
+	irda.SCSSR1 = 0x0060;
+	irda.SCSSR1_unread = 0x60;
+	irda.SCFRDR1_count = 0;
+	irda.SCFCR1 = 0x00;
+}
+
 static void init_scif(void)
 {
 	scif.SCSMR2 = 0x00;
@@ -6991,6 +7152,7 @@ static void reset(void)
 	init_ubc();
 	init_tmu();
 	init_scif();
+	init_irda();
 	init_ioports();
 	init_eeprom();
 	init_motherboard();
@@ -9716,6 +9878,25 @@ static void update_clocks(void)
 	update_top_light();
 }
 
+static uint8_t irda_receive_triggers(void)
+{
+	uint8_t rtrg;
+
+	rtrg = (irda.SCFCR1 & (SCFCR1_RTRG1 | SCFCR1_RTRG0)) >> 6;
+	switch (rtrg) {
+	case 0:
+		return 1;
+	case 1:
+		return 4;
+	case 2:
+		return 8;
+	case 3:
+		return 14;
+	default:
+		return panic("BUG: impossible IrDA RTRG setting\n");
+	}
+}
+
 static uint8_t scif_receive_triggers(void)
 {
 	uint8_t rtrg;
@@ -9732,6 +9913,25 @@ static uint8_t scif_receive_triggers(void)
 		return 14;
 	default:
 		return panic("BUG: impossible SCIF RTRG setting\n");
+	}
+}
+
+static uint8_t irda_transmit_triggers(void)
+{
+	uint8_t ttrg;
+
+	ttrg = (irda.SCFCR1 & (SCFCR1_TTRG1 | SCFCR1_TTRG0)) >> 4;
+	switch (ttrg) {
+	case 0:
+		return 8;
+	case 1:
+		return 4;
+	case 2:
+		return 2;
+	case 3:
+		return 1;
+	default:
+		return panic("BUG: impossible IrDA TTRG setting\n");
 	}
 }
 
@@ -9752,6 +9952,29 @@ static uint8_t scif_transmit_triggers(void)
 	default:
 		return panic("BUG: impossible SCIF TTRG setting\n");
 	}
+}
+
+static void irda_receive_single_char(void)
+{
+	char c;
+
+	if (irda.rx_queue_cnt == 0)
+		return;
+	c = irda.rx_queue[irda.rx_queue_start];
+	irda.rx_queue_start = (irda.rx_queue_start + 1) % IRDA_RX_QUEUE_SIZE;
+	irda.rx_queue_cnt--;
+
+	/* TODO: generic fifo structure? Ring buffer implementation? */
+	if (irda.SCFRDR1_count == 16)
+		return;
+	memmove(&irda.SCFRDR1[1], &irda.SCFRDR1[0], irda.SCFRDR1_count++);
+	irda.SCFRDR1[0] = c;
+	if (irda.SCFRDR1_count >= irda_receive_triggers()) {
+		irda.SCSSR1 |= SCSSR1_RDF;
+		irda.SCSSR1_unread |= SCSSR1_RDF;
+	}
+	/* TODO: serial interrupts? Are they even used by the jornada? */
+	/* TODO: break detection? */
 }
 
 static void scif_receive_single_char(void)
@@ -9777,6 +10000,19 @@ static void scif_receive_single_char(void)
 	/* TODO: break detection? */
 }
 
+static void write_irda(void)
+{
+#ifdef __unix__
+	if (irda_fd == -1)
+		return;
+	if (write(irda_fd, &irda.SCFTDR1[irda.SCFTDR1_count], 1) != -1)
+		return;
+	if (errno == EAGAIN || errno == EWOULDBLOCK)
+		return;
+	perror(progname);
+#endif
+}
+
 static void write_serial(void)
 {
 #ifdef __unix__
@@ -9788,6 +10024,26 @@ static void write_serial(void)
 		return;
 	perror(progname);
 #endif
+}
+
+static void irda_send_single_char(void)
+{
+	/* TODO: shoudn't transmission be blocked when TE is unset? */
+	/* TODO: interrupts? */
+	if (irda.SCFTDR1_count == 0)
+		return;
+
+	console_monitor_save_byte(&irda_monitor, irda.SCFTDR1[--irda.SCFTDR1_count]);
+	write_irda();
+
+	if (irda.SCFTDR1_count == 0) {
+		irda.SCSSR1 |= SCSSR1_TEND;
+		irda.SCSSR1_unread |= SCSSR1_TEND;
+	}
+	if (irda.SCFTDR1_count <= irda_transmit_triggers()) {
+		irda.SCSSR1 |= SCSSR1_TDFE;
+		irda.SCSSR1_unread |= SCSSR1_TDFE;
+	}
 }
 
 static void send_single_char(void)
@@ -9825,6 +10081,7 @@ static void update_scif(void)
 	 * loops, or 80 to be safe.
 	 */
 	scif_receive_single_char();
+	irda_receive_single_char();
 }
 
 /*
@@ -11435,6 +11692,7 @@ struct struct_layout {
 	{&ioports, sizeof(ioports)},
 	{&dmac, sizeof(dmac)},
 	{&scif, sizeof(scif)},
+	{&irda, sizeof(irda)},
 	{&cpg, sizeof(cpg)},
 	{&wdt_regs, sizeof(wdt_regs)},
 	{&stbcr_reg, sizeof(stbcr_reg)},
@@ -11608,6 +11866,18 @@ static int hex_to_char(const char *hex, char *result)
 	return 0;
 }
 
+static void irda_receive_enqueue(char c)
+{
+	if (irda.rx_queue_cnt == IRDA_RX_QUEUE_SIZE) {
+		printf("Character 0x%.2x dropped from infrared input\n", c);
+		return;
+	}
+	/* TODO: write tests for full buffer */
+	irda.rx_queue[irda.rx_queue_end] = c;
+	irda.rx_queue_end = (irda.rx_queue_end + 1) % IRDA_RX_QUEUE_SIZE;
+	irda.rx_queue_cnt++;
+}
+
 static void scif_receive_enqueue(char c)
 {
 	if (scif.rx_queue_cnt == SCIF_RX_QUEUE_SIZE) {
@@ -11674,6 +11944,8 @@ static int monitor_command_handler(int argc, const char **argv)
 		write_flag_to_byte(&enabled_monitors, MONITOR_NOTICE_ENABLED, on);
 	} else if (strcmp(argv[1], "serial") == 0) {
 		write_flag_to_byte(&enabled_monitors, MONITOR_SERIAL_ENABLED, on);
+	} else if (strcmp(argv[1], "irda") == 0) {
+		write_flag_to_byte(&enabled_monitors, MONITOR_IRDA_ENABLED, on);
 	} else if (strcmp(argv[1], "xb3a") == 0) {
 		write_flag_to_byte(&enabled_monitors, MONITOR_XB3A_ENABLED, on);
 	} else if (strcmp(argv[1], "pen") == 0) {
@@ -11787,6 +12059,26 @@ static int dispatch_command_line(char *line)
 	return CLI_CONTINUE;
 }
 
+static void read_irda(void)
+{
+#ifdef __unix__
+	char curr;
+
+	if (irda_fd == -1)
+		return;
+
+	while (irda.rx_queue_cnt < IRDA_RX_QUEUE_SIZE) {
+		if (read(irda_fd, &curr, 1) == -1) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return;
+			perror(progname);
+			return;
+		}
+		irda_receive_enqueue(curr);
+	}
+#endif
+}
+
 static void read_serial(void)
 {
 #ifdef __unix__
@@ -11822,6 +12114,7 @@ static void prompt_loop(void)
 	 * modes so it's better to check for it here.
 	 */
 	read_serial();
+	read_irda();
 
 	while (status != CLI_EXIT) {
 		if (status == CLI_RUN)
