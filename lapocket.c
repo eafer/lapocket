@@ -143,6 +143,15 @@ void notice(const char *format, ...)
 FILE *card_file = NULL;
 long card_size;
 
+#ifdef __unix
+#include <fcntl.h>
+#include <unistd.h>
+
+/* If provided, this file will be the serial interface */
+static int serial_fd = -1;
+
+#endif
+
 /*
  * The motherboard for the Jornada 545 reads "Hewlett Packard F1796-80004
  * 0007EU206". I haven't found any documentation for it, but it seems to have
@@ -4903,6 +4912,7 @@ static int parse_options(int argc, char *argv[])
 	FILE *fw_file = NULL;
 	char *script_name = NULL;
 	char *card_name = NULL;
+	char *serial_name = NULL;
 	size_t ret;
 	int i;
 
@@ -4923,6 +4933,10 @@ static int parse_options(int argc, char *argv[])
 			if (++i == argc)
 				usage();
 			card_name = argv[i];
+		} else if (strcmp(argv[i], "-S") == 0) {
+			if (++i == argc)
+				usage();
+			serial_name = argv[i];
 		} else if (strcmp(argv[i], "--headless") == 0) {
 			headless = true;
 		} else if (i == argc - 1) {
@@ -4978,6 +4992,18 @@ static int parse_options(int argc, char *argv[])
 			perror(progname);
 			return 1;
 		}
+	}
+
+	if (serial_name) {
+#ifdef __unix__
+		serial_fd = open(serial_name, O_RDWR | O_NOCTTY | O_NONBLOCK);
+		if (serial_fd == -1) {
+			perror(progname);
+			return 1;
+		}
+#else
+		fprintf(stderr, "%s: serial port not supported in your system\n", progname);
+#endif
 	}
 
 	if (headless) {
@@ -9751,14 +9777,29 @@ static void scif_receive_single_char(void)
 	/* TODO: break detection? */
 }
 
+static void write_serial(void)
+{
+#ifdef __unix__
+	if (serial_fd == -1)
+		return;
+	if (write(serial_fd, &scif.SCFTDR2[scif.SCFTDR2_count], 1) != -1)
+		return;
+	if (errno == EAGAIN || errno == EWOULDBLOCK)
+		return;
+	perror(progname);
+#endif
+}
+
 static void send_single_char(void)
 {
 	/* TODO: shoudn't transmission be blocked when TE is unset? */
 	/* TODO: interrupts? */
 	if (scif.SCFTDR2_count == 0)
 		return;
-	/* TODO: send to an actual serial device */
+
 	console_monitor_save_byte(&serial_monitor, scif.SCFTDR2[--scif.SCFTDR2_count]);
+	write_serial();
+
 	if (scif.SCFTDR2_count == 0) {
 		scif.SCSSR2 |= SCSSR2_TEND;
 		scif.SCSSR2_unread |= SCSSR2_TEND;
@@ -11746,6 +11787,26 @@ static int dispatch_command_line(char *line)
 	return CLI_CONTINUE;
 }
 
+static void read_serial(void)
+{
+#ifdef __unix__
+	char curr;
+
+	if (serial_fd == -1)
+		return;
+
+	while (scif.rx_queue_cnt < SCIF_RX_QUEUE_SIZE) {
+		if (read(serial_fd, &curr, 1) == -1) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return;
+			perror(progname);
+			return;
+		}
+		scif_receive_enqueue(curr);
+	}
+#endif
+}
+
 static void prompt_loop(void)
 {
 	FILE *infile = NULL;
@@ -11755,6 +11816,12 @@ static void prompt_loop(void)
 	/* The user may want a prompt before any code has a chance to run */
 	if (status == -1)
 		status = interactive || script_file ? CLI_CONTINUE : CLI_RUN;
+
+	/*
+	 * One more input event of sorts, but it's shared by the headless and SDL
+	 * modes so it's better to check for it here.
+	 */
+	read_serial();
 
 	while (status != CLI_EXIT) {
 		if (status == CLI_RUN)
