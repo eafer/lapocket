@@ -1133,7 +1133,7 @@ static bool is_display_regs_byte_address(uint32_t addr)
 
 static int display_read_byte_reg(uint32_t addr, uint8_t *val_p)
 {
-	if (addr >= DISPLAY_FB_OFF && addr < DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
+	if ((addr & 0xFFF80000) == DISPLAY_FB_OFF) {
 		*val_p = display.fb[addr - DISPLAY_FB_OFF];
 		return 0;
 	}
@@ -1161,7 +1161,7 @@ static int display_read_byte_reg(uint32_t addr, uint8_t *val_p)
 
 static int display_write_byte_reg(uint32_t addr, uint8_t val)
 {
-	if (addr >= DISPLAY_FB_OFF && addr < DISPLAY_FB_OFF + DISPLAY_RAM_SIZE) {
+	if ((addr & 0xFFF80000) == DISPLAY_FB_OFF) {
 		display.fb[addr - DISPLAY_FB_OFF] = val;
 		display_dirty = true;
 		return 0;
@@ -6312,7 +6312,7 @@ static int read_word(uint32_t addr, uint16_t *val_p)
 		*val_p = *(uint16_t *)(memory + (addr & MEMORY_MASK));
 		return 0;
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+		if ((addr & 0xFFF80000) != DISPLAY_FB_OFF)
 			return panic("Unsupported display register 0x%.8x\n", addr);
 		*val_p = *(uint16_t *)(display.fb + (addr - DISPLAY_FB_OFF));
 		return 0;
@@ -6436,7 +6436,7 @@ static int read_longword(uint32_t addr, uint32_t *val_p)
 		*val_p = *(uint32_t *)(memory + (addr & MEMORY_MASK));
 		return 0;
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+		if ((addr & 0xFFF80000) != DISPLAY_FB_OFF)
 			return panic("Unsupported display register 0x%.8x\n", addr);
 		*val_p = *(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF));
 		return 0;
@@ -6592,7 +6592,7 @@ static int write_word(uint32_t addr, uint16_t val)
 		*(uint16_t *)(memory + (addr & MEMORY_MASK)) = val;
 		return 0;
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+		if ((addr & 0xFFF80000) != DISPLAY_FB_OFF)
 			return panic("Unsupported display register 0x%.8x\n", addr);
 		*(uint16_t *)(display.fb + (addr - DISPLAY_FB_OFF)) = val;
 		display_dirty = true;
@@ -6683,7 +6683,7 @@ static int write_longword(uint32_t addr, uint32_t val)
 		*(uint32_t *)(memory + (addr & MEMORY_MASK)) = val;
 		return 0;
 	case DISPLAY_OFF:
-		if (addr < DISPLAY_FB_OFF || addr >= DISPLAY_FB_OFF + DISPLAY_RAM_SIZE)
+		if ((addr & 0xFFF80000) != DISPLAY_FB_OFF)
 			return panic("Unsupported display register 0x%.8x\n", addr);
 		*(uint32_t *)(display.fb + (addr - DISPLAY_FB_OFF)) = val;
 		display_dirty = true;
