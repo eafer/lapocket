@@ -3834,12 +3834,19 @@ static int read_irda_byte_reg(uint32_t addr, uint8_t *val_p)
 	}
 }
 
+static void irda_set_tx_interrupt(void);
+static void irda_clear_tx_interrupt(void);
+
 static int write_irda_word_reg(uint32_t addr, uint16_t val)
 {
 	switch (addr) {
 	case IRDA_SCSSR1_OFF:
 		val &= irda.SCSSR1; /* No flags can be set to 1 by a write */
 		irda.SCSSR1 = (irda.SCSSR1 & irda.SCSSR1_unread) | val;
+		if (!(irda.SCSSR1 & SCSSR1_TDFE)) {
+			irda_clear_tx_interrupt();
+			exception_check_prepare();
+		}
 		return 0;
 	case IRDA_SCFDR1_OFF:
 		return 0;
@@ -3847,6 +3854,8 @@ static int write_irda_word_reg(uint32_t addr, uint16_t val)
 		return panic("Attempted write to unsupported IrDA register at 0x%.8x\n", addr);
 	}
 }
+
+static uint8_t irda_transmit_triggers(void);
 
 static int write_irda_byte_reg(uint32_t addr, uint8_t val)
 {
@@ -3862,6 +3871,10 @@ static int write_irda_byte_reg(uint32_t addr, uint8_t val)
 		return 0;
 	case IRDA_SCSCR1_OFF:
 		irda.SCSCR1 = val & SCSCR1_BIT_MASK;
+		if (!(irda.SCSCR1 & SCSCR1_TIE)) {
+			irda_clear_tx_interrupt();
+			exception_check_prepare();
+		}
 		return 0;
 	case IRDA_SCFTDR1_OFF:
 		/* TODO: generic fifo structure? Ring buffer implementation? */
@@ -3870,6 +3883,15 @@ static int write_irda_byte_reg(uint32_t addr, uint8_t val)
 		memmove(&irda.SCFTDR1[1], &irda.SCFTDR1[0], irda.SCFTDR1_count++);
 		irda.SCFTDR1[0] = val;
 		irda.SCSSR1 &= ~(SCSSR1_TEND | SCSSR1_TDFE);
+		if (irda.SCFTDR1_count > irda_transmit_triggers()) {
+			/*
+			 * It's not clear to me from the manual if this alone is enough to
+			 * clear the interrupts, or if I need to do both this AND unset
+			 * SCSSR1_TDFE. I don't think this will matter in practice (TODO?).
+			 */
+			irda_clear_tx_interrupt();
+			exception_check_prepare();
+		}
 		return 0;
 	case IRDA_SCFRDR1_OFF:
 		/* TODO: exception or something? Not documented */
@@ -4118,6 +4140,16 @@ static void set_dma_interrupt(void)
 static void clear_dma_interrupt(void)
 {
 	intc.IRR1 &= ~IRR1_DEI0R;
+}
+
+static void irda_set_tx_interrupt(void)
+{
+	intc.IRR1 |= IRR1_TXI1R;
+}
+
+static void irda_clear_tx_interrupt(void)
+{
+	intc.IRR1 &= ~IRR1_TXI1R;
 }
 
 static bool is_intc_byte_address(uint32_t addr)
@@ -10039,8 +10071,10 @@ static void irda_send_single_char(void)
 	if (irda.SCFTDR1_count <= irda_transmit_triggers()) {
 		irda.SCSSR1 |= SCSSR1_TDFE;
 		irda.SCSSR1_unread |= SCSSR1_TDFE;
-		if (irda.SCSCR1 & SCSCR1_TIE)
-			(void)panic("IrDA tx interrupts not yet implemented\n");
+		if (irda.SCSCR1 & SCSCR1_TIE) {
+			irda_set_tx_interrupt();
+			no_exception = false;
+		}
 	}
 }
 
@@ -10250,6 +10284,20 @@ static void dei_accept(int i, int priority)
 	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
 }
 
+/* Accept a TXIi interrupt */
+static void txi_accept(int i, int priority)
+{
+	cpu.SPC = cpu.PC - 4;
+	cpu.SSR = cpu.SR;
+	cpu.SR |= (SR_BL_BIT | SR_MD_BIT | SR_RB_BIT);
+	mmu_cache_invalidate();
+	cpu.PC = cpu.VBR + 0x600 + 4;
+	cpu.INTEVT = priority_to_intevt(priority);
+	/* Only TXI1 and TXI2 are supported */
+	cpu.INTEVT2 = i == 1 ? 0x8E0 : 0x960;
+	backtrace_push(cpu.SPC + 4, cpu.PC, true /* exception */);
+}
+
 /* Returns the priority level for IRQi */
 static int irq_priority(int i)
 {
@@ -10302,6 +10350,16 @@ static int dei_priority(int i)
 	return (intc.IPRE >> 12) & 0x000F;
 }
 
+/* Returns the priority level for serial/irda interrupt TXIi */
+static int txi_priority(int i)
+{
+	int shift;
+
+	/* This function only handles TXI1 and TXI2, but there's also a plain TXI */
+	shift = i == 1 ? 8 : 4;
+	return (intc.IPRE >> shift) & 0x000F;
+}
+
 /* Accept the highest priority interrupt unless it's too low for the SR mask */
 static void interrupt_accept(void)
 {
@@ -10347,6 +10405,14 @@ static void interrupt_accept(void)
 	}
 
 	if (intc.IRR1) {
+		if (intc.IRR1 & IRR1_TXI1R) {
+			curr_priority = txi_priority(1);
+			if (curr_priority > max_priority) {
+				max_priority = curr_priority;
+				max_num = 1;
+				accept_fn = txi_accept;
+			}
+		}
 		if (intc.IRR1 & IRR1_DEI0R) {
 			curr_priority = dei_priority(0);
 			if (curr_priority > max_priority) {
