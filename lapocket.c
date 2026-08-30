@@ -5483,6 +5483,8 @@ static int write_scif_byte_reg(uint32_t addr, uint8_t val)
 		scif.SCBRR2 = val;
 		return 0;
 	case SCIF_SCSCR2_OFF:
+		if (val & (SCSCR2_TIE | SCSCR2_RIE))
+			return panic("Serial interrupts not supported\n");
 		scif.SCSCR2 = val & SCSCR2_BIT_MASK;
 		return 0;
 	case SCIF_SCFTDR2_OFF:
@@ -9974,8 +9976,9 @@ static void irda_receive_single_char(void)
 	if (irda.SCFRDR1_count >= irda_receive_triggers()) {
 		irda.SCSSR1 |= SCSSR1_RDF;
 		irda.SCSSR1_unread |= SCSSR1_RDF;
+		if (irda.SCSCR1 & SCSCR1_RIE)
+			(void)panic("IrDA rx interrupts not yet implemented\n");
 	}
-	/* TODO: serial interrupts? Are they even used by the jornada? */
 	/* TODO: break detection? */
 }
 
@@ -9998,7 +10001,6 @@ static void scif_receive_single_char(void)
 		scif.SCSSR2 |= SCSSR2_RDF;
 		scif.SCSSR2_unread |= SCSSR2_RDF;
 	}
-	/* TODO: serial interrupts? Are they even used by the jornada? */
 	/* TODO: break detection? */
 }
 
@@ -10031,7 +10033,6 @@ static void write_serial(void)
 static void irda_send_single_char(void)
 {
 	/* TODO: shoudn't transmission be blocked when TE is unset? */
-	/* TODO: interrupts? */
 	if (irda.SCFTDR1_count == 0)
 		return;
 
@@ -10045,13 +10046,14 @@ static void irda_send_single_char(void)
 	if (irda.SCFTDR1_count <= irda_transmit_triggers()) {
 		irda.SCSSR1 |= SCSSR1_TDFE;
 		irda.SCSSR1_unread |= SCSSR1_TDFE;
+		if (irda.SCSCR1 & SCSCR1_TIE)
+			(void)panic("IrDA tx interrupts not yet implemented\n");
 	}
 }
 
 static void send_single_char(void)
 {
 	/* TODO: shoudn't transmission be blocked when TE is unset? */
-	/* TODO: interrupts? */
 	if (scif.SCFTDR2_count == 0)
 		return;
 
