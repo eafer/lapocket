@@ -3890,6 +3890,7 @@ static int write_irda_byte_reg(uint32_t addr, uint8_t val)
 			irda.SCFRDR1_count = 0;
 		if (val & SCFCR1_TFRST)
 			irda.SCFTDR1_count = 0;
+		irda.SCFCR1 = val;
 		return 0;
 	default:
 		return panic("Attempted write to unsupported IrDA register at 0x%.8x\n", addr);
@@ -5512,6 +5513,7 @@ static int write_scif_byte_reg(uint32_t addr, uint8_t val)
 			scif.SCFRDR2_count = 0;
 		if (val & SCFCR2_TFRST)
 			scif.SCFTDR2_count = 0;
+		scif.SCFCR2 = val;
 		return 0;
 	default:
 		return panic("Attempted write to unsupported SCIF register at 0x%.8x\n", addr);
