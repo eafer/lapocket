@@ -3848,8 +3848,6 @@ static int write_irda_word_reg(uint32_t addr, uint16_t val)
 	}
 }
 
-static void irda_send_single_char(void);
-
 static int write_irda_byte_reg(uint32_t addr, uint8_t val)
 {
 	switch (addr) {
@@ -3872,13 +3870,6 @@ static int write_irda_byte_reg(uint32_t addr, uint8_t val)
 		memmove(&irda.SCFTDR1[1], &irda.SCFTDR1[0], irda.SCFTDR1_count++);
 		irda.SCFTDR1[0] = val;
 		irda.SCSSR1 &= ~(SCSSR1_TEND | SCSSR1_TDFE);
-		/*
-		 * I'd rather do this inside update_irda(), but that function isn't
-		 * called on every run() loop and so the output of some tests would
-		 * break in awkward places.
-		 */
-		irda_send_single_char();
-		/* TODO: serial interrupts? Are they even used by the jornada? */
 		return 0;
 	case IRDA_SCFRDR1_OFF:
 		/* TODO: exception or something? Not documented */
@@ -10088,6 +10079,12 @@ static void update_scif(void)
 	 */
 	scif_receive_single_char();
 	irda_receive_single_char();
+	/*
+	 * Sending out data too quickly also causes issues because interrupts may
+	 * not have been set yet. TODO: serial should also go here, but it breaks
+	 * some tests...
+	 */
+	irda_send_single_char();
 }
 
 /*
