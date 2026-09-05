@@ -14,6 +14,10 @@
 #include <SDL3/SDL_main.h>
 #endif
 
+#ifdef HAVE_SDL_IMG
+#include <SDL3_image/SDL_image.h>
+#endif
+
 static void eeprom_monitor_dump_all(void);
 struct console_monitor;
 static void console_monitor_dump(struct console_monitor *mon);
@@ -4989,6 +4993,8 @@ static int mmu_virt_to_phys(uint32_t va, uint32_t *pa, bool write)
 char *progname = NULL;
 bool interactive = false;
 FILE *script_file = NULL;
+static char *overlay_name = NULL;
+static char *hitmap_name = NULL;
 
 #define MAX_BREAKPOINTS	128
 
@@ -5128,6 +5134,14 @@ static int parse_options(int argc, char *argv[])
 			irda_name = argv[i];
 		} else if (strcmp(argv[i], "--headless") == 0) {
 			headless = true;
+		} else if (strcmp(argv[i], "--overlay") == 0) {
+			if (++i == argc)
+				usage();
+			overlay_name = argv[i];
+		} else if (strcmp(argv[i], "--hitmap") == 0) {
+			if (++i == argc)
+				usage();
+			hitmap_name = argv[i];
 		} else if (i == argc - 1) {
 			fw_name = argv[i];
 		} else {
@@ -5138,6 +5152,15 @@ static int parse_options(int argc, char *argv[])
 		usage();
 	if (interactive && script_name)
 		usage();
+
+	if ((bool)hitmap_name != (bool)overlay_name)
+		usage();
+#ifndef HAVE_SDL_IMG
+	if (overlay_name) {
+		fprintf(stderr, "%s: build doesn't support overlays\n", progname);
+		return 1;
+	}
+#endif
 
 	fw_file = fopen(fw_name, "rb");
 	if (!fw_file) {
@@ -5222,15 +5245,150 @@ static int parse_options(int argc, char *argv[])
 
 #ifdef HAVE_SDL
 
+/* The fancy color names come from krita */
+#define COLOR_ALPHA			0x00000000
+#define COLOR_BLACK			0xFF000000
+#define COLOR_WHITE			0xFFFFFFFF
+#define COLOR_COBALT_BLUE	0xFFAA4600
+#define COLOR_LEMON_YELLOW	0xFF24FCF2
+#define COLOR_ASDA_GREEN	0xFF688746
+#define COLOR_RGB_RED		0xFF0000FF
+#define COLOR_SALMON		0xFF688BFE
+#define COLOR_PINK			0xFFDACAFE
+#define COLOR_ROSE_PINK		0xFFCB65FE
+#define COLOR_DEEP_PINK		0xFF9213FE
+#define COLOR_CERISE		0xFF6230DD
+/* These are the meanings for each color in the hitmap */
+#define COLOR_INVALID		COLOR_ALPHA
+#define COLOR_ONOFF			COLOR_BLACK
+#define COLOR_DISPLAY		COLOR_WHITE
+#define COLOR_UP			COLOR_COBALT_BLUE
+#define COLOR_ENTER			COLOR_LEMON_YELLOW
+#define COLOR_DOWN			COLOR_ASDA_GREEN
+#define COLOR_RECORD		COLOR_RGB_RED
+/* TODO: is this actually the exit button? */
+#define COLOR_EXIT			COLOR_SALMON
+#define COLOR_QL1			COLOR_PINK
+#define COLOR_QL2			COLOR_ROSE_PINK
+#define COLOR_QL3			COLOR_DEEP_PINK
+#define COLOR_QL4			COLOR_CERISE
+
+/*
+ * My overlay has a size of 1245x1634, and the area for the display is 617x822.
+ * The window's dimensions were picked so that the width/height of the display
+ * would be more or less a multiple of the framebuffer's, which will help us
+ * avoid awkward interpolations. TODO: don't hardcode so much stuff, get the
+ * dimensions from the image.
+ */
+#define WINDOW_INITIAL_WIDTH	484
+#define WINDOW_INITIAL_HEIGHT	636
+#define RENDERER_LOGICAL_WIDTH	WINDOW_INITIAL_WIDTH
+#define RENDERER_LOGICAL_HEIGHT	WINDOW_INITIAL_HEIGHT
+
 static void reset(void);
 
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
-static SDL_Texture *texture = NULL;
+static SDL_Texture *display_texture = NULL;
+static SDL_Texture *overlay_texture = NULL;
+static SDL_Surface *hitmap_surface = NULL;
+static SDL_FRect display_rect = {0};
+
+static int display_rect_setup(void)
+{
+	uint32_t *pixels = NULL;
+	int first_x = -1;
+	int first_y = -1;
+	int last_x = -1;
+	int last_y = -1;
+	int i, j;
+
+	if (!overlay_name) {
+		display_rect.x = 0;
+		display_rect.y = 0;
+		display_rect.w = DISPLAY_FB_WIDTH;
+		display_rect.h = DISPLAY_FB_HEIGHT;
+		return 0;
+	}
+
+	for (i = 0; i < hitmap_surface->h; ++i) {
+		pixels = hitmap_surface->pixels + hitmap_surface->pitch * i;
+		for (j = 0; j < hitmap_surface->w; ++j) {
+			if (pixels[j] == COLOR_DISPLAY) {
+				if (first_x == -1) {
+					first_x = j;
+					first_y = i;
+				}
+				last_x = j;
+				last_y = i;
+			}
+		}
+	}
+	if (first_x == -1) {
+		fprintf(stderr, "%s: hitmap image (%s) doesn't have a white area for the display\n", progname, hitmap_name);
+		return 1;
+	}
+
+	display_rect.x = first_x;
+	display_rect.y = first_y;
+	display_rect.w = last_x - first_x + 1;
+	display_rect.h = last_y - first_y + 1;
+
+	/*
+	 * Rounding errors up to this point could make the scaling awkward, so snap
+	 * dimensions to exact framebuffer multiples. The "+ 10" is just to make
+	 * sure we are past the dimensions required before we round down.
+	 */
+	display_rect.w = (((int)display_rect.w + 10) / DISPLAY_FB_WIDTH) * DISPLAY_FB_WIDTH;
+	display_rect.h = (((int)display_rect.h + 10) / DISPLAY_FB_HEIGHT) * DISPLAY_FB_HEIGHT;
+
+	return 0;
+}
+
+static int overlay_setup(void)
+{
+# ifdef HAVE_SDL_IMG
+	struct SDL_Surface *tempsurf1 = NULL, *tempsurf2 = NULL;
+
+	if (!overlay_name)
+		return display_rect_setup();
+
+	overlay_texture = IMG_LoadTexture(renderer, overlay_name);
+	if (!overlay_texture) {
+		fprintf(stderr, "%s: failed to load a texture from %s\n", progname, overlay_name);
+		return 1;
+	}
+	if (!SDL_SetTextureScaleMode(overlay_texture, SDL_SCALEMODE_NEAREST)) {
+		fprintf(stderr, "%s: failed to set the scale mode for the overlay (%s)\n", progname, SDL_GetError());
+		return 1;
+	}
+
+	tempsurf1 = IMG_Load(hitmap_name);
+	if (!tempsurf1) {
+		fprintf(stderr, "%s: failed to load a surface from %s\n", progname, hitmap_name);
+		return 1;
+	}
+	tempsurf2 = SDL_ConvertSurface(tempsurf1, SDL_PIXELFORMAT_ABGR8888);
+	if (!tempsurf2) {
+		fprintf(stderr, "%s: failed to convert the hitmap surface (%s)\n", progname, SDL_GetError());
+		return 1;
+	}
+	hitmap_surface = SDL_ScaleSurface(tempsurf2, RENDERER_LOGICAL_WIDTH, RENDERER_LOGICAL_HEIGHT, SDL_SCALEMODE_NEAREST);
+	if (!hitmap_surface) {
+		fprintf(stderr, "%s: failed to scale the hitmap surface (%s)\n", progname, SDL_GetError());
+		return 1;
+	}
+	SDL_DestroySurface(tempsurf1);
+	SDL_DestroySurface(tempsurf2);
+# endif
+
+	return display_rect_setup();
+}
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 {
 	struct SDL_AudioSpec audio_spec;
+	int real_w, real_h, logic_w, logic_h;
 
 	if (parse_options(argc, argv))
 		return SDL_APP_FAILURE;
@@ -5246,17 +5404,30 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 		fprintf(stderr, "%s: failed to initialize SDL (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	if (!SDL_CreateWindowAndRenderer("La Pocket", DISPLAY_FB_WIDTH << 1, DISPLAY_FB_HEIGHT << 1, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
+
+	if (overlay_name) {
+		real_w = WINDOW_INITIAL_WIDTH;
+		real_h = WINDOW_INITIAL_HEIGHT;
+		logic_w = RENDERER_LOGICAL_WIDTH;
+		logic_h = RENDERER_LOGICAL_HEIGHT;
+	} else {
+		logic_w = real_w = DISPLAY_FB_WIDTH;
+		logic_h = real_h = DISPLAY_FB_HEIGHT;
+	}
+	if (!SDL_CreateWindowAndRenderer("La Pocket", real_w, real_h, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
 		fprintf(stderr, "%s: failed to create the window (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	if (!SDL_SetRenderLogicalPresentation(renderer, DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE)) {
+	if (!SDL_SetRenderLogicalPresentation(renderer, logic_w, logic_h, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE)) {
 		fprintf(stderr, "%s: failed to set the logical presentation (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 
-	/* The screen is black until we turn it on */
-	if (!SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE)) {
+	if (overlay_setup())
+		return SDL_APP_FAILURE;
+
+	/* Match the background of the overlay picture */
+	if (!SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, SDL_ALPHA_OPAQUE)) {
 		fprintf(stderr, "%s: failed to set the render draw color (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
@@ -5269,12 +5440,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 		return SDL_APP_FAILURE;
 	}
 
-	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT);
-	if (!texture) {
+	display_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, DISPLAY_FB_WIDTH, DISPLAY_FB_HEIGHT);
+	if (!display_texture) {
 		fprintf(stderr, "%s: failed to create texture (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
-	if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST)) {
+	if (!SDL_SetTextureScaleMode(display_texture, SDL_SCALEMODE_NEAREST)) {
 		fprintf(stderr, "%s: failed to set the scale mode (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
@@ -5311,15 +5482,22 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 		return SDL_APP_FAILURE;
 	}
 
+	if (overlay_texture) {
+		if (!SDL_RenderTexture(renderer, overlay_texture, NULL, NULL)) {
+			fprintf(stderr, "%s: failed to render the overlay texture (%s)\n", progname, SDL_GetError());
+			return SDL_APP_FAILURE;
+		}
+	}
+
 	pitch = DISPLAY_FB_WIDTH << 2;
-	if (!SDL_LockTexture(texture, NULL, &pixels, &pitch)) {
+	if (!SDL_LockTexture(display_texture, NULL, &pixels, &pitch)) {
 		fprintf(stderr, "%s: failed to lock the texture (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
 	memcpy(pixels, display.output, sizeof(display.output));
-	SDL_UnlockTexture(texture);
+	SDL_UnlockTexture(display_texture);
 
-	if (!SDL_RenderTexture(renderer, texture, NULL, NULL)) {
+	if (!SDL_RenderTexture(renderer, display_texture, NULL, &display_rect)) {
 		fprintf(stderr, "%s: failed to render the texture (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
@@ -5331,6 +5509,140 @@ SDL_AppResult SDL_AppIterate(void *appstate)
 }
 
 static void pen_update(int x, int y);
+
+static bool coordinates_are_in_rect(int x, int y, SDL_FRect *rect)
+{
+	if (x < rect->x || y < rect->y)
+		return false;
+	if (x >= rect->x + rect->w || y >= rect->y + rect->h)
+		return false;
+	return true;
+}
+
+static uint32_t hitmap_coordinates_to_color(int x, int y)
+{
+	uint32_t *row = NULL;
+
+	/* Without an overlay we only get the display and some empty borders */
+	if (!hitmap_surface) {
+		if (!coordinates_are_in_rect(x, y, &display_rect))
+			return COLOR_INVALID;
+		return COLOR_DISPLAY;
+	}
+
+	if (x >= hitmap_surface->w || y >= hitmap_surface->h)
+		return COLOR_INVALID;
+	row = hitmap_surface->pixels + hitmap_surface->pitch * y;
+	return row[x];
+}
+
+/* TODO: calling the debugger functions like this is kinda hacky... */
+static int input_onoff_handler(int argc, const char **argv);
+static int input_ql1_handler(int argc, const char **argv);
+static int input_ql2_handler(int argc, const char **argv);
+static int input_ql3_handler(int argc, const char **argv);
+static int input_ql4_handler(int argc, const char **argv);
+static int input_exit_handler(int argc, const char **argv);
+static int input_record_handler(int argc, const char **argv);
+static int input_enter_handler(int argc, const char **argv);
+static int input_down_handler(int argc, const char **argv);
+static int input_up_handler(int argc, const char **argv);
+
+static void button_release_all(void)
+{
+	if (!button_state)
+		return;
+	if (button_state & BUTTON_ONOFF_PUSHED)
+		input_onoff_handler(1, NULL);
+	if (button_state & BUTTON_QL1_PUSHED)
+		input_ql1_handler(1, NULL);
+	if (button_state & BUTTON_QL2_PUSHED)
+		input_ql2_handler(1, NULL);
+	if (button_state & BUTTON_QL3_PUSHED)
+		input_ql3_handler(1, NULL);
+	if (button_state & BUTTON_QL4_PUSHED)
+		input_ql4_handler(1, NULL);
+	if (button_state & BUTTON_EXIT_PUSHED)
+		input_exit_handler(1, NULL);
+	if (button_state & BUTTON_RECORD_PUSHED)
+		input_record_handler(1, NULL);
+	if (button_state & BUTTON_ENTER_PUSHED)
+		input_enter_handler(1, NULL);
+	if (button_state & BUTTON_DOWN_PUSHED)
+		input_down_handler(1, NULL);
+	if (button_state & BUTTON_UP_PUSHED)
+		input_up_handler(1, NULL);
+}
+
+static void button_event_dispatch(int x, int y, bool down)
+{
+	uint32_t color;
+
+	color = hitmap_coordinates_to_color(x, y);
+
+	if (!down) {
+		/* We don't know which button was pushed (if any) so release them all */
+		button_release_all();
+		if (touchscreen.x >= 0)
+			pen_update(-1, -1);
+		return;
+	}
+
+	switch (color) {
+	case COLOR_DISPLAY:
+		return pen_update(x, y);
+	case COLOR_ONOFF:
+		if ((bool)(button_state & BUTTON_ONOFF_PUSHED) != down)
+			input_onoff_handler(1, NULL);
+		return;
+	case COLOR_UP:
+		if ((bool)(button_state & BUTTON_UP_PUSHED) != down)
+			input_up_handler(1, NULL);
+		return;
+	case COLOR_ENTER:
+		if ((bool)(button_state & BUTTON_ENTER_PUSHED) != down)
+			input_enter_handler(1, NULL);
+		return;
+	case COLOR_DOWN:
+		if ((bool)(button_state & BUTTON_DOWN_PUSHED) != down)
+			input_down_handler(1, NULL);
+		return;
+	case COLOR_RECORD:
+		if ((bool)(button_state & BUTTON_RECORD_PUSHED) != down)
+			input_record_handler(1, NULL);
+		return;
+	case COLOR_EXIT:
+		if ((bool)(button_state & BUTTON_EXIT_PUSHED) != down)
+			input_exit_handler(1, NULL);
+		return;
+	case COLOR_QL1:
+		if ((bool)(button_state & BUTTON_QL1_PUSHED) != down)
+			input_ql1_handler(1, NULL);
+		return;
+	case COLOR_QL2:
+		if ((bool)(button_state & BUTTON_QL2_PUSHED) != down)
+			input_ql2_handler(1, NULL);
+		return;
+	case COLOR_QL3:
+		if ((bool)(button_state & BUTTON_QL3_PUSHED) != down)
+			input_ql3_handler(1, NULL);
+		return;
+	case COLOR_QL4:
+		if ((bool)(button_state & BUTTON_QL4_PUSHED) != down)
+			input_ql4_handler(1, NULL);
+		return;
+	default:
+	}
+}
+
+static void mouse_drag_dispatch(int x, int y)
+{
+	/* We lift the pen when it gets dragged past the edge of the display */
+	if (hitmap_coordinates_to_color(x, y) == COLOR_DISPLAY)
+		pen_update(x, y);
+	else
+		pen_update(-1, -1);
+}
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 {
@@ -5345,15 +5657,15 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
 	if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
-		pen_update(event->button.x, event->button.y);
+		button_event_dispatch(event->button.x, event->button.y, true);
 	} else if (event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
 		if (event->button.button != SDL_BUTTON_LEFT)
 			return SDL_APP_CONTINUE;
-		pen_update(-1, -1);
+		button_event_dispatch(event->button.x, event->button.y, false);
 	} else if (event->type == SDL_EVENT_MOUSE_MOTION) {
 		/* If the pen is already down, this is a drag */
 		if (touchscreen.x >= 0)
-			pen_update(event->motion.x, event->motion.y);
+			mouse_drag_dispatch(event->motion.x, event->motion.y);
 	}
 
 	return SDL_APP_CONTINUE;

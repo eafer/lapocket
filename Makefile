@@ -15,6 +15,13 @@ else
     ifeq ($(SDL3_ERR),0)
       SDL3_CFLAGS = $(shell pkgconf --cflags sdl3) -DHAVE_SDL
       SDL3_LIBS = $(shell pkgconf --libs sdl3)
+      SDL3_IMG_ERR = $(shell pkgconf --exists sdl3-image >&/dev/null; echo $$?)
+      ifeq ($(SDL3_IMG_ERR),0)
+        SDL3_IMG_CFLAGS = $(shell pkgconf --cflags sdl3-image) -DHAVE_SDL_IMG
+        SDL3_IMG_LIBS = $(shell pkgconf --libs sdl3-image)
+      else
+        $(info Failed to find sdl3-image, overlays will not work...)
+      endif
     else
       $(info Failed to find sdl3, building headless...)
     endif
@@ -23,11 +30,11 @@ else
   endif
 endif
 
-CFLAGS = -Wall -Wextra -Wno-unused-parameter -O3 $(SDL3_CFLAGS) $(EMCC_FLAGS)
+CFLAGS = -Wall -Wextra -Wno-unused-parameter -O3 $(SDL3_CFLAGS) $(SDL3_IMG_CFLAGS) $(EMCC_FLAGS)
 # TODO: enable unused parameter warning
 
 $(TARGET): lapocket.c
-	$(CC) $(CFLAGS) -o $(TARGET) lapocket.c $(SDL3_LIBS)
+	$(CC) $(CFLAGS) -o $(TARGET) lapocket.c $(SDL3_LIBS) $(SDL3_IMG_LIBS)
 
 clean:
 	rm -rf *.o index.js index.wasm lapocket
