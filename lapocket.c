@@ -5665,7 +5665,7 @@ static void button_event_dispatch(int x, int y, bool down)
 
 	switch (color) {
 	case COLOR_DISPLAY:
-		return pen_update(x, y);
+		return pen_update(x - display_rect.x, y - display_rect.y);
 	case COLOR_ONOFF:
 		if ((bool)(button_state & BUTTON_ONOFF_PUSHED) != down)
 			input_onoff_handler(1, NULL);
@@ -5715,7 +5715,7 @@ static void mouse_drag_dispatch(int x, int y)
 {
 	/* We lift the pen when it gets dragged past the edge of the display */
 	if (hitmap_coordinates_to_color(x, y) == COLOR_DISPLAY)
-		pen_update(x, y);
+		pen_update(x - display_rect.x, y - display_rect.y);
 	else
 		pen_update(-1, -1);
 }
