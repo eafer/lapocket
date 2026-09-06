@@ -5707,6 +5707,7 @@ static void button_event_dispatch(int x, int y, bool down)
 			input_ql4_handler(1, NULL);
 		return;
 	default:
+		return;
 	}
 }
 
