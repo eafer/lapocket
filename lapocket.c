@@ -3590,6 +3590,47 @@ static int read_word(uint32_t addr, uint16_t *val_p);
 static int write_word(uint32_t addr, uint16_t val);
 static void set_dma_interrupt(void);
 static void clear_dma_interrupt(void);
+static uint32_t p1_p2_to_phys(uint32_t addr);
+
+enum mmu_cache_access {
+	mca_r8,
+	mca_r16,
+	mca_r32,
+	mca_w8,
+	mca_w16,
+	mca_w32,
+	mca_count,
+};
+static int mmu_virt_to_phys_through_cache(uint32_t va, uint32_t *pa, enum mmu_cache_access access);
+
+static int dma_spoof_for_sound_samples(void)
+{
+	void *src = NULL;
+	uint32_t addr;
+
+	addr = p1_p2_to_phys(dmac.SAR0);
+	if (addr < MEMORY_OFF || addr >= MEMORY_OFF + MEMORY_SIZE)
+		return panic("DMA only supported from ram\n");
+	src = memory + (addr & MEMORY_MASK);
+
+#ifdef HAVE_SDL
+	if (!headless) {
+		/*
+		 * In reality this would get written to the sample register two bytes
+		 * at a time through DMA.
+		 */
+		if (!SDL_PutAudioStreamData(audio_stream, src, dmac.DMATCR0 << 1))
+			notice("SDL missed some audio samples (%s)\n", SDL_GetError());
+		if (!SDL_FlushAudioStream(audio_stream))
+			notice("SDL failed to flush the audio stream (%s)\n", SDL_GetError());
+	}
+#endif
+
+	/* The step is always two at the source, 0 at the destination */
+	dmac.SAR0 += dmac.DMATCR0 << 1;
+	dmac.DMATCR0 = 0;
+	return 0;
+}
 
 /*
  * Note that in reality dmac only happens when requested by the external (sound
@@ -3634,6 +3675,18 @@ static int dma_execute(void)
 	/* Setting DMATCR0 to 0 produces the maximum transfer count of 1 << 24 */
 	audio.a_pretime = nanosecs;
 	audio.a_count = dmac.DMATCR0 ? dmac.DMATCR0 : 1 << 24;
+
+#if 1
+	/*
+	 * DMA only seems to get used for sound, and this bypass works much better
+	 * there than doing things properly.
+	 */
+	if (src_step != 2 || dest_step != 0)
+		return panic("Only sound samples supported for DMA\n");
+	if (dma_spoof_for_sound_samples())
+		return 1;
+	(void)data16;
+#else
 	do {
 		/* Ban recursion here, for the sake of my sanity */
 		if (is_dmac_word_address(dmac.SAR0) || is_dmac_word_address(dmac.DAR0))
@@ -3646,6 +3699,7 @@ static int dma_execute(void)
 		dmac.SAR0 += src_step;
 		dmac.DAR0 += dest_step;
 	} while (--dmac.DMATCR0);
+#endif
 
 	return 0;
 }
@@ -4619,16 +4673,6 @@ struct mmu {
 #define TLB_D				(0x000001U << 0)	/* Dirty bit */
 
 #define PAGE_MASK			(~((1 << 10) - 1))
-
-enum mmu_cache_access {
-	mca_r8,
-	mca_r16,
-	mca_r32,
-	mca_w8,
-	mca_w16,
-	mca_w32,
-	mca_count,
-};
 
 struct mmu_cache_line {
 	uint32_t va;	/* Virtual address of page (-1 if invalid) */
@@ -10221,6 +10265,28 @@ static void set_debugger_nanosecs_sdl()
 static void update_scif(void);
 static void update_top_light(void);
 
+static int audio_available_samples(void)
+{
+	int samples;
+
+#ifdef HAVE_SDL
+	if (!headless) {
+		samples = SDL_GetAudioStreamAvailable(audio_stream);
+		if (samples != -1)
+			return samples;
+		notice("SDL can't count remaining bytes in audio stream\n");
+	}
+#endif
+	/*
+	 * TODO: think of a more reasonable way to implement headless mode so that
+	 * I can get rid of all these useless audio globals.
+	 */
+	if (nanosecs - audio.a_pretime >= audio.a_period * audio.a_count)
+		return 0;
+	else
+		return 2000; /* Just something above the threshold */
+}
+
 /*
  * We want the tests to be deterministic so, when running headless, the clock
  * update frequency is arbitrarily synced to the execution loop. All that
@@ -10317,11 +10383,11 @@ static void update_clocks(void)
 	update_top_light();
 
 	/*
-	 * Once enough time has passed for all the audio samples to play, trigger
-	 * the dma interrupt, pretending that the copy just completed now.
+	 * If we are running low on audio samples to output, trigger the dma
+	 * interrupt to ask for more.
 	 */
 	if (chcr_is_dma_running(dmac.CHCR0)) {
-		if (nanosecs - audio.a_pretime >= audio.a_period * audio.a_count) {
+		if (audio_available_samples() < 1000) {
 			dmac.CHCR0 |= CHCR_TE;
 			if (dmac.CHCR0 & CHCR_IE) {
 				set_dma_interrupt();
