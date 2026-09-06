@@ -10,4 +10,4 @@ failure.out
 *.gcno
 /index.js
 /index.wasm
-/firmware.bin
+/assets

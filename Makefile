@@ -7,7 +7,7 @@ ifdef EMCC
   TARGET = index.js
   SDL3_CFLAGS = -DHAVE_SDL -DHAVE_PNG
   SDL3_LIBS = -sUSE_SDL=3 -sUSE_LIBPNG
-  EMCC_FLAGS = --embed-file firmware.bin --pre-js pre.js
+  EMCC_FLAGS = --embed-file assets --pre-js pre.js
 else
   PKGCONF_ERR = $(shell pkgconf --about >&/dev/null; echo $$?)
   ifeq ($(PKGCONF_ERR),0)
