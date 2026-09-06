@@ -14,8 +14,8 @@
 #include <SDL3/SDL_main.h>
 #endif
 
-#ifdef HAVE_SDL_IMG
-#include <SDL3_image/SDL_image.h>
+#ifdef HAVE_PNG
+#include <png.h>
 #endif
 
 static void eeprom_monitor_dump_all(void);
@@ -5155,7 +5155,7 @@ static int parse_options(int argc, char *argv[])
 
 	if ((bool)hitmap_name != (bool)overlay_name)
 		usage();
-#ifndef HAVE_SDL_IMG
+#ifndef HAVE_PNG
 	if (overlay_name) {
 		fprintf(stderr, "%s: build doesn't support overlays\n", progname);
 		return 1;
@@ -5345,43 +5345,118 @@ static int display_rect_setup(void)
 	return 0;
 }
 
-static int overlay_setup(void)
+static int overlay_texture_setup(void)
 {
-# ifdef HAVE_SDL_IMG
-	struct SDL_Surface *tempsurf1 = NULL, *tempsurf2 = NULL;
+	png_image image = {0};
+	void *buf = NULL;
+	size_t bufsize;
+	int stride;
 
-	if (!overlay_name)
-		return display_rect_setup();
+	image.version = PNG_IMAGE_VERSION;
+	if (!png_image_begin_read_from_file(&image, overlay_name)) {
+		fprintf(stderr, "%s: failed to begin png read from %s\n", progname, overlay_name);
+		return 1;
+	}
+	image.format = PNG_FORMAT_RGBA;
 
-	overlay_texture = IMG_LoadTexture(renderer, overlay_name);
+	/* Sanity check before the cast to SDL types */
+	if (image.width > 10000 || image.height > 10000) {
+		fprintf(stderr, "%s: overlay image %s is too big\n", progname, overlay_name);
+		return 1;
+	}
+	bufsize = PNG_IMAGE_SIZE(image);
+	buf = malloc(bufsize);
+	if (!buf) {
+		perror(progname);
+		return 1;
+	}
+
+	stride = PNG_IMAGE_ROW_STRIDE(image);
+	if (!png_image_finish_read(&image, NULL, buf, stride, NULL)) {
+		fprintf(stderr, "%s: failed to finish png read from %s\n", progname, overlay_name);
+		return 1;
+	}
+
+	overlay_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC, image.width, image.height);
 	if (!overlay_texture) {
-		fprintf(stderr, "%s: failed to load a texture from %s\n", progname, overlay_name);
+		fprintf(stderr, "%s: failed to create the texture for the overlay (%s)\n", progname, SDL_GetError());
 		return 1;
 	}
 	if (!SDL_SetTextureScaleMode(overlay_texture, SDL_SCALEMODE_NEAREST)) {
 		fprintf(stderr, "%s: failed to set the scale mode for the overlay (%s)\n", progname, SDL_GetError());
 		return 1;
 	}
+	if (!SDL_UpdateTexture(overlay_texture, NULL, buf, stride)) {
+		fprintf(stderr, "%s: failed to update the overlay texture (%s)\n", progname, SDL_GetError());
+		return 1;
+	}
 
-	tempsurf1 = IMG_Load(hitmap_name);
-	if (!tempsurf1) {
-		fprintf(stderr, "%s: failed to load a surface from %s\n", progname, hitmap_name);
+	free(buf);
+	buf = NULL;
+	return 0;
+}
+
+static int hitmap_surface_setup(void)
+{
+	struct SDL_Surface *tempsurf = NULL;
+	png_image image = {0};
+	void *buf = NULL;
+	size_t bufsize;
+	int stride;
+
+	image.version = PNG_IMAGE_VERSION;
+	if (!png_image_begin_read_from_file(&image, hitmap_name)) {
+		fprintf(stderr, "%s: failed to begin png read from %s\n", progname, hitmap_name);
 		return 1;
 	}
-	tempsurf2 = SDL_ConvertSurface(tempsurf1, SDL_PIXELFORMAT_ABGR8888);
-	if (!tempsurf2) {
-		fprintf(stderr, "%s: failed to convert the hitmap surface (%s)\n", progname, SDL_GetError());
+	image.format = PNG_FORMAT_RGBA;
+
+	/* Sanity check before the cast to SDL types */
+	if (image.width > 10000 || image.height > 10000) {
+		fprintf(stderr, "%s: hitmap image %s is too big\n", progname, hitmap_name);
 		return 1;
 	}
-	hitmap_surface = SDL_ScaleSurface(tempsurf2, RENDERER_LOGICAL_WIDTH, RENDERER_LOGICAL_HEIGHT, SDL_SCALEMODE_NEAREST);
+	bufsize = PNG_IMAGE_SIZE(image);
+	buf = malloc(bufsize);
+	if (!buf) {
+		perror(progname);
+		return 1;
+	}
+
+	stride = PNG_IMAGE_ROW_STRIDE(image);
+	if (!png_image_finish_read(&image, NULL, buf, stride, NULL)) {
+		fprintf(stderr, "%s: failed to finish png read from %s\n", progname, hitmap_name);
+		return 1;
+	}
+
+	tempsurf = SDL_CreateSurfaceFrom(image.width, image.height, SDL_PIXELFORMAT_ABGR8888, buf, stride);
+	if (!tempsurf) {
+		fprintf(stderr, "%s: failed to create the hitmap surface (%s)\n", progname, SDL_GetError());
+		return 1;
+	}
+	hitmap_surface = SDL_ScaleSurface(tempsurf, RENDERER_LOGICAL_WIDTH, RENDERER_LOGICAL_HEIGHT, SDL_SCALEMODE_NEAREST);
 	if (!hitmap_surface) {
 		fprintf(stderr, "%s: failed to scale the hitmap surface (%s)\n", progname, SDL_GetError());
 		return 1;
 	}
-	SDL_DestroySurface(tempsurf1);
-	SDL_DestroySurface(tempsurf2);
-# endif
+	SDL_DestroySurface(tempsurf);
+	tempsurf = NULL;
 
+	free(buf);
+	buf = NULL;
+	return 0;
+}
+
+static int overlay_setup(void)
+{
+# ifdef HAVE_PNG
+	if (overlay_name) {
+		if (overlay_texture_setup())
+			return 1;
+		if (hitmap_surface_setup())
+			return 1;
+	}
+# endif
 	return display_rect_setup();
 }
 
