@@ -5533,7 +5533,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[])
 		logic_w = real_w = DISPLAY_FB_WIDTH;
 		logic_h = real_h = DISPLAY_FB_HEIGHT;
 	}
-	if (!SDL_CreateWindowAndRenderer("La Pocket", real_w, real_h, SDL_WINDOW_RESIZABLE, &window, &renderer)) {
+	if (!SDL_CreateWindowAndRenderer("La Pocket", real_w, real_h, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &window, &renderer)) {
 		fprintf(stderr, "%s: failed to create the window (%s)\n", progname, SDL_GetError());
 		return SDL_APP_FAILURE;
 	}
