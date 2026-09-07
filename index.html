@@ -1,2 +1,24 @@
-<canvas id="canvas"></canvas>
-<script async src="index.js"></script>
+<html>
+  <head>
+    <script>
+      /*
+       * The emulator doesn't use the keyboard at all at this point so no need
+       * to capture those events and break keyboard shortcuts. I don't know much
+       * about javascript so gratitude to samuelnj from Stack Overflow for this
+       * solution:
+       *
+       *   https://stackoverflow.com/a/47231903
+       */
+      window.addEventListener('keydown', function(event){
+        event.stopImmediatePropagation();
+      }, true);
+      window.addEventListener('keyup', function(event){
+        event.stopImmediatePropagation();
+      }, true);
+    </script>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <script async src="index.js"></script>
+  </body>
+</html>
