@@ -5,7 +5,7 @@ seem to have liked. As far as I know, this is the first emulator
 available for any sh3-powered PocketPC device. It's functional enough,
 but it has audio issues and it's a bit slow. A web build (including
 firmware, overlays and some software in a memory card) is available
-[here](https://lapocket.neocities.com). The native build is faster and
+[here](https://lapocket.neocities.org). The native build is faster and
 has some extra features.
 
 ## Known issues
@@ -125,7 +125,7 @@ to be used as a CompactFlash card. The format of the overlay and hitmap
 may be a bit tricky right now; if you are interested in making your own
 then you can get the details from the source code, otherwise you can
 probably get my overlay from the
-[webpage](https://lapocket.neocities.com)
+[webpage](https://lapocket.neocities.org)
 I mentioned before.
 
 Now it's time to run the actual build:
