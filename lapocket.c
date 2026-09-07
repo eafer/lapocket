@@ -170,8 +170,18 @@ void notice(const char *format, ...)
 	puts("");
 	puts("");
 
+#ifdef __EMSCRIPTEN__
+	/*
+	 * Not much point in panicking when there is no debugger, and no real risk
+	 * from out-of-bounds operations or the like. Just try to keep going and
+	 * hope for the best.
+	 */
+	panicked = false;
+	return 0;
+#else
 	panicked = true;
 	return 1;
+#endif
 }
 
 /*
