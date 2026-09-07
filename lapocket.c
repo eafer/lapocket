@@ -10284,7 +10284,7 @@ static int audio_available_samples(void)
 	if (nanosecs - audio.a_pretime >= audio.a_period * audio.a_count)
 		return 0;
 	else
-		return 2000; /* Just something above the threshold */
+		return 10000; /* Just something above the threshold */
 }
 
 /*
@@ -10387,7 +10387,7 @@ static void update_clocks(void)
 	 * interrupt to ask for more.
 	 */
 	if (chcr_is_dma_running(dmac.CHCR0)) {
-		if (audio_available_samples() < 1000) {
+		if (audio_available_samples() < 8000) {
 			dmac.CHCR0 |= CHCR_TE;
 			if (dmac.CHCR0 & CHCR_IE) {
 				set_dma_interrupt();
