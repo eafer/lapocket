@@ -148,7 +148,7 @@ reports are fine of course, as long as you vouch for them.
 ## Credits
 
 The emulator was written by
-(Ernesto A. Fernández)[https://github.com/eafer].
+[Ernesto A. Fernández](https://github.com/eafer).
 
 As far as I can recall, the following manuals were the main sources for
 my work:
