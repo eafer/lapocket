@@ -71,13 +71,18 @@ If you have a firmware file, now you can start the emulator with
 
 	./lapocket <path_to_firmware>
 
-I'll try to make my firmware dump available somewhere soon. If you also
+If you don't, you can get my firmware dump
+[here](https://lapocket.neocities.org/assets/firmware.bin). If you also
 have an overlay picture to apply:
 
 	./lapocket --overlay overlay.png --hitmap hitmap.png <path_to_firmware>
 
-Finally, if you want to share files with the host, you will need to
-insert a fake CompactFlash card, which the Jornada will format to FAT:
+Again, I've made an
+[overlay](https://lapocket.neocities.org/assets/overlay.png) and the
+corresponding [hitmap](https://lapocket.neocities.org/assets/hitmap.png)
+available at my webpage. Finally, if you want to share files with the host,
+you will need to insert a fake CompactFlash card, which the Jornada will
+format to FAT:
 
 	touch flash.img
 	truncate -s <card_size> flash.img
@@ -118,15 +123,17 @@ will retrieve them:
 	cd lapocket
 	mkdir assets
 
-In there put the firmware dump (under the name "firmware.bin"), the
-overlay picture (called "overlay.png"), the map of hotspots for the
-overlay (called "hitmap.png") and a file with any contents ("flash.img")
+In there put the
+[firmware dump](https://lapocket.neocities.org/assets/firmware.bin)
+(under the name "firmware.bin"), the
+[overlay picture](https://lapocket.neocities.org/assets/overlay.png)
+(called "overlay.png"), the
+[map of hotspots](https://lapocket.neocities.org/assets/hitmap.png)
+for the overlay (called "hitmap.png") and a file with any contents ("flash.img")
 to be used as a CompactFlash card. The format of the overlay and hitmap
 may be a bit tricky right now; if you are interested in making your own
-then you can get the details from the source code, otherwise you can
-probably get my overlay from the
-[webpage](https://lapocket.neocities.org)
-I mentioned before.
+then you can get the details from the source code, otherwise you should
+just use the ones I linked to above.
 
 Now it's time to run the actual build:
 
